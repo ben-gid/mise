@@ -1,0 +1,44 @@
+{
+  "title": "Garlic Butter Focaccia",
+  "description": "Slow-proofed focaccia with a garlic butter crust.",
+  "base_servings": 4,
+  "ingredients": [
+    { "id": "0001", "name": "bread flour", "amount": 500, "unit": "g" },
+    { "id": "0002", "name": "water", "amount": 400, "unit": "ml" },
+    { "id": "0003", "name": "fine sea salt", "amount": 10, "unit": "g" },
+    { "id": "0004", "name": "instant yeast", "amount": 1, "unit": "tsp" },
+    { "id": "0005", "name": "garlic cloves", "amount": 4, "unit": null },
+    { "id": "0006", "name": "butter", "amount": 60, "unit": "g" },
+    { "id": "0007", "name": "flaky salt", "amount": 1, "unit": "pinch" }
+  ],
+  "steps": [
+    {
+      "id": "s1",
+      "title": "Mix the dough",
+      "content": "Whisk {0001}, {0003} and {0004}, then pour in {0002} and mix to a shaggy dough.",
+      "timer_seconds": null
+    },
+    {
+      "id": "s2",
+      "title": "Bulk proof",
+      "content": "Cover and leave at room temperature until doubled.",
+      "timer_seconds": 7200
+    },
+    {
+      "id": "s3",
+      "title": "Make the garlic butter",
+      "content": "Melt {0006} with finely sliced {0005} over low heat.",
+      "timer_seconds": 300
+    },
+    {
+      "id": "s4",
+      "title": "Bake",
+      "content": "Dimple the dough, pour over the garlic butter, scatter {0007} and bake at 220C.",
+      "timer_seconds": 1500
+    }
+  ],
+  "notes": "The dough can rest overnight in the fridge instead of the 2h bulk proof.",
+  "tags": ["bread", "vegetarian", "make-ahead"],
+  "source": "claude-generated",
+  "created_at": "2026-08-13T10:24:00Z"
+}
