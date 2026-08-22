@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mise/recipe/recipe_parser.dart';
 import 'package:mise/recipe/recipe_store.dart';
+import 'package:mise/recipe/recipe_units.dart';
 import 'package:mise/recipe/ui/recipe_detail_screen.dart';
 import 'package:mise/recipe/ui/recipe_list_screen.dart';
 
@@ -185,6 +186,37 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('625 g bread flour'), findsOneWidget);
     expect(find.textContaining('{0001}'), findsNothing);
+  });
+
+  testWidgets('detail screen honours the unit settings', (tester) async {
+    weightSystem.value = UnitSystem.imperial;
+    volumeSystem.value = UnitSystem.imperial;
+    addTearDown(() {
+      weightSystem.value = UnitSystem.metric;
+      volumeSystem.value = UnitSystem.metric;
+    });
+    await pumpDetail(tester);
+
+    // 500 g flour reads as a decimal off a scale; 400 ml water as a fraction
+    // off a measuring cup.
+    expect(find.text('1 lb 1.6 oz'), findsOneWidget);
+    expect(find.text('1⅔ cups'), findsOneWidget);
+
+    // Legacy units the prompt no longer asks for are left as written.
+    expect(find.text('1 tsp'), findsOneWidget);
+
+    // 4 -> 5 servings puts the water at 500 ml, which needs both terms.
+    await tester.tap(find.byIcon(Icons.add));
+    await tester.pumpAndSettle();
+    expect(find.text('2 cups + 2 tbsp'), findsOneWidget);
+
+    await tester.scrollUntilVisible(
+      find.text('Mix the dough'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('2 cups + 2 tbsp water'), findsOneWidget);
   });
 
   /// Opens the editor from the detail screen and waits for its fields.

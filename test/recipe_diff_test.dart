@@ -77,12 +77,14 @@ void main() {
         ..['unit'] = 'tbsp';
     });
 
+    // The diff renders through amountLabel, so amounts follow the unit
+    // settings like everywhere else: 2 tbsp reads as 30 ml under metric.
     expect(diffRecipes(original(), after).single, (
       kind: ChangeKind.ingredient,
       label: 'Ingredient',
       detail: 'name, amount, unit',
       before: '60 g butter',
-      after: '2 tbsp salted butter',
+      after: '30 ml salted butter',
     ));
   });
 
@@ -101,7 +103,7 @@ void main() {
         label: 'Ingredient',
         detail: null,
         before: null,
-        after: '2 tbsp olive oil',
+        after: '30 ml olive oil',
       ),
     ]);
 
@@ -112,7 +114,7 @@ void main() {
         kind: ChangeKind.ingredient,
         label: 'Ingredient',
         detail: null,
-        before: '2 tbsp olive oil',
+        before: '30 ml olive oil',
         after: null,
       ),
     ]);

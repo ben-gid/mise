@@ -51,11 +51,36 @@ substitutes them at render time with amounts scaled by the servings stepper. JSO
 can't express cross-references, so `RecipeParser` adds a post-validation pass rejecting
 `{id}` refs that don't resolve — a dangling ref would silently break scaling.
 
+**Units are display-only, and every amount goes through one function.** The stored recipe is
+never rewritten: `weightSystem` and `volumeSystem` in
+[lib/recipe/recipe_units.dart](lib/recipe/recipe_units.dart) are `ValueNotifier`s — the same
+global pattern as `themeMode`, not constructor-passed — that change only how an amount
+*reads*. `amountLabel` is the single chokepoint: ingredient rows, inline `{0001}` refs, the
+share text and the version diff all route through it, so a second formatting path would
+drift immediately. Scale first, convert second — the rounding never goes back to disk, or
+tripling a recipe would compound a rounded cup into a wrong one.
+
+**Any unit with a fixed factor converts; the stored unit only picks the dimension.**
+`_gramsPer` and `_mlPer` canonicalise g/kg/oz/lb and ml/l/tsp/tbsp/cup/fl_oz into grams or
+millilitres *before* rendering, so a recipe hand-written in cups is readable in millilitres
+and back again. Adding a unit to the schema enum means adding it to one of those maps — a
+unit in neither renders as written and silently ignores the setting, which is exactly what
+shipped the first time. `pinch` is the one deliberate exception: it has no fixed factor.
+
+**Weight reads in decimals, volume in fractions.** Not an inconsistency to tidy up: weight is
+measured on a scale, which shows `1 lb 9.1 oz` and has no decimal-pound mode at all, so
+`1.57 lb` is a number nobody can dial in. Volume is measured with cups and spoons, so it gets
+`¾ cup + 1½ tbsp` — two terms, because snapping to one rung puts 200 ml 11% off. Imperial
+weight below ~½ oz stays in grams, where a tenth of an ounce is 13% of 5 g.
+
 **Storage is one JSON file per recipe** in the app documents dir, filename = id =
 `<createdAtMillis>-<title-slug>.json`. Recipes carry no id field of their own (the schema
 describes what an LLM emits, not how we file it), so `RecipeStore.loadAll` returns
 `(id, recipe)` records. A file that won't decode is skipped and logged, never deleted.
-`RecipeStore` takes a `Directory` so tests can point it at a temp dir.
+`RecipeStore` takes a `Directory` so tests can point it at a temp dir. Everything that isn't
+a recipe — version history, ratings, the theme, the unit systems — lives beside them in
+plain-text `.meta` sidecars, and the extension is what keeps `loadAll` from trying to parse
+them as recipes. A settings file written as `.json` would show up as a corrupt recipe.
 
 **No state management package and none wanted** — three screens over one store, plain
 `StatefulWidget` + `setState`, `Navigator.push` between them. The store and parser are
@@ -84,3 +109,10 @@ constructed once in `main()` and passed down by constructor.
   `rootBundle.loadString` fails at runtime while tests (which read from disk) still pass.
 - A `ListView` only builds what's near the viewport; widget tests asserting on content
   further down need `tester.scrollUntilVisible` rather than assuming it's in the tree.
+- A route already pushed on the Navigator does **not** repaint when the unit notifiers
+  change. Rebuilding `MaterialApp` rebuilds the Navigator but not the element subtrees of
+  live routes, and unlike `Theme` there is no InheritedWidget carrying the dependency across
+  the boundary. It doesn't bite today only because Settings is reachable from the list
+  screen alone, which shows no amounts, so every recipe screen is built fresh on the way
+  back. Putting a Settings entry point on the detail screen means wrapping that screen's
+  build in an `AnimatedBuilder` over `weightSystem` and `volumeSystem`.

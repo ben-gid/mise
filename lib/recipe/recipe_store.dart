@@ -160,6 +160,16 @@ class RecipeStore {
 
   Future<void> setThemeName(String name) => _themeFile.writeAsString(name);
 
+  /// The display unit systems, as `"<weight>,<volume>"` [UnitSystem] names, or
+  /// null for never chosen. Same plain-text sidecar as the theme, and one file
+  /// rather than two — the two settings are always written together.
+  File get _unitsFile => File('${dir.path}/units.meta');
+
+  Future<String?> unitSystems() async =>
+      _unitsFile.existsSync() ? _unitsFile.readAsString() : null;
+
+  Future<void> setUnitSystems(String names) => _unitsFile.writeAsString(names);
+
   /// One recipe file, or null if it won't decode — a corrupt file is skipped
   /// and logged rather than taking a whole listing down with it, and nothing is
   /// deleted, so it stays recoverable by hand.

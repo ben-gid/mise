@@ -1,28 +1,24 @@
 import 'recipe_models.dart';
+import 'recipe_units.dart';
+
+// Re-exported so the display helpers all arrive with one import, the way they
+// did before units moved into their own file.
+export 'recipe_units.dart' show formatAmount, unitLabel;
 
 /// Scales ingredient amounts by servings and renders `{0001}` references in
-/// step content. Pure functions — no widgets, so they test directly.
+/// step content. No widgets, so they test directly — though the display units
+/// come from the notifiers in recipe_units.dart, which a test can set.
 
-/// `1.0` -> "1", `166.666` -> "166.67".
-String formatAmount(num amount) {
-  final rounded = (amount * 100).round() / 100;
-  return rounded == rounded.roundToDouble()
-      ? rounded.round().toString()
-      : rounded.toString();
-}
-
-/// "750 g", or bare "6" for countable items whose counting noun already lives
-/// in [Ingredient.name].
+/// "750 g", "¾ cup + 1½ tbsp", or bare "6" for countable items whose
+/// counting noun already lives in [Ingredient.name].
+///
+/// Scale first, convert second: the rounding is display-only, so tripling a
+/// recipe can't compound a rounded cup into a wrong one.
 String amountLabel(Ingredient ingredient, double factor) {
-  final amount = formatAmount(ingredient.amount * factor);
+  final amount = ingredient.amount * factor;
   final unit = ingredient.unit;
-  return unit == null ? amount : '$amount ${unitLabel(unit)}';
+  return unit == null ? formatAmount(amount) : formatMeasure(amount, unit);
 }
-
-String unitLabel(Unit unit) => switch (unit) {
-  Unit.flOz => 'fl oz',
-  _ => unit.name,
-};
 
 double scaleFactor(Recipe recipe, int servings) =>
     servings / recipe.baseServings;
