@@ -52,7 +52,7 @@ can't express cross-references, so `RecipeParser` adds a post-validation pass re
 `{id}` refs that don't resolve — a dangling ref would silently break scaling.
 
 **Units are display-only, and every amount goes through one function.** The stored recipe is
-never rewritten: `weightSystem` and `volumeSystem` in
+never rewritten: `weightSystem`, `volumeSystem` and `measureBy` in
 [lib/recipe/recipe_units.dart](lib/recipe/recipe_units.dart) are `ValueNotifier`s — the same
 global pattern as `themeMode`, not constructor-passed — that change only how an amount
 *reads*. `amountLabel` is the single chokepoint: ingredient rows, inline `{0001}` refs, the
@@ -60,12 +60,35 @@ share text and the version diff all route through it, so a second formatting pat
 drift immediately. Scale first, convert second — the rounding never goes back to disk, or
 tripling a recipe would compound a rounded cup into a wrong one.
 
-**Any unit with a fixed factor converts; the stored unit only picks the dimension.**
-`_gramsPer` and `_mlPer` canonicalise g/kg/oz/lb and ml/l/tsp/tbsp/cup/fl_oz into grams or
-millilitres *before* rendering, so a recipe hand-written in cups is readable in millilitres
-and back again. Adding a unit to the schema enum means adding it to one of those maps — a
-unit in neither renders as written and silently ignores the setting, which is exactly what
-shipped the first time. `pinch` is the one deliberate exception: it has no fixed factor.
+**Any unit with a fixed factor converts; `density_g_per_ml` is what crosses between
+dimensions.** `_gramsPer` and `_mlPer` canonicalise g/kg/oz/lb and ml/l/tsp/tbsp/cup/fl_oz
+into grams or millilitres *before* rendering, so a recipe hand-written in cups is readable
+in millilitres and back again. Adding a unit to the schema enum means adding it to one of
+those maps — a unit in neither renders as written and silently ignores the setting, which
+is exactly what shipped the first time. `pinch` is the one deliberate exception: it has no
+fixed factor.
+
+The stored unit only decides which dimension an amount *starts* in. An optional
+`density_g_per_ml` divides grams into millilitres or multiplies back, so 500 g of flour
+reads as cups and a cups-written recipe becomes weighable. It is optional because required
+would break saving — every save re-validates through `RecipeParser.parse`, so a required
+field makes every recipe already on disk unsaveable — and because eggs and pinches have no
+meaningful density. `canConvert` answers whether a row can switch at all — only those get the `swap_horiz`
+icon, though every row taps and answers with a SnackBar. `isDerived` answers whether the
+amount on screen was *computed* through a density rather than read as stored, and a
+highlight band behind the row is the only thing that says so. Both live in
+`recipe_units.dart` and resolve the dimension through the same `_dimensions` helper
+`formatMeasure` uses — a second copy of that decision would drift the band away from the
+number it describes. The band tracks approximation, not interaction: tapping a derived row
+back onto its stored unit clears it, and a settings change lights a whole recipe at once.
+Nothing marks approximation in the share text or the version diff, which are plain
+strings with nowhere to put a highlight.
+
+Per-ingredient flips are deliberately **not** persisted — a `Set<String>` in the detail
+screen's state, gone when you leave. `measureBy` is the persisted half, appended as a third
+value to the `units.meta` line. If per-recipe persistence is ever added it needs carrying
+forward in `saveVersion`: a recipe's id derives from `createdAt`, which every edit
+restamps, which is why ratings silently reset on edit today.
 
 **Weight reads in decimals, volume in fractions.** Not an inconsistency to tidy up: weight is
 measured on a scale, which shows `1 lb 9.1 oz` and has no decimal-pound mode at all, so
@@ -109,6 +132,9 @@ constructed once in `main()` and passed down by constructor.
   `rootBundle.loadString` fails at runtime while tests (which read from disk) still pass.
 - A `ListView` only builds what's near the viewport; widget tests asserting on content
   further down need `tester.scrollUntilVisible` rather than assuming it's in the tree.
+- A widget test asserting on an amount has to know which unit settings are live: at the
+  metric default `1 tsp` of yeast renders as `5 ml`, so `find.text('1 tsp')` only works in
+  a test that set `volumeSystem` to imperial first.
 - A route already pushed on the Navigator does **not** repaint when the unit notifiers
   change. Rebuilding `MaterialApp` rebuilds the Navigator but not the element subtrees of
   live routes, and unlike `Theme` there is no InheritedWidget carrying the dependency across

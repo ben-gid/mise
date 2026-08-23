@@ -70,6 +70,12 @@
             null
           ],
           "description": "null for whole/countable items"
+        },
+        "density_g_per_ml": {
+          "type": ["number", "null"],
+          "minimum": 0.1,
+          "maximum": 2.0,
+          "description": "Grams per millilitre, for ingredients genuinely measurable both ways. Spooned and levelled, not packed: flour 0.53, granulated sugar 0.85, brown sugar 0.93, water 1.0, milk 1.03, oil 0.92, honey 1.42, cocoa 0.51, butter 0.91. Omit for countable items, pinches, and anything only ever measured one way."
         }
       }
     },

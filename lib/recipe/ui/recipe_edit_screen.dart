@@ -116,6 +116,9 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
         // message naming the ingredient — no second set of rules here.
         amount: num.tryParse(draft.amount.text.trim()) ?? 0,
         unit: draft.unit,
+        // Blank means absent, which is valid — unlike amount there is no
+        // sentinel that the schema will reject on the user's behalf.
+        densityGPerMl: num.tryParse(draft.density.text.trim()),
       ),
   ];
 
@@ -229,7 +232,10 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
             'unchanged.\n'
             '- Step content references ingredients inline as {0001} — never '
             'repeat the amount in the text.\n'
-            '- Set timer_seconds whenever a step involves waiting.\n\n'
+            '- Set timer_seconds whenever a step involves waiting.\n'
+            '- Set density_g_per_ml on every ingredient that could reasonably '
+            'be measured either way, keeping any already there. Omit it only '
+            'for countable items and pinches.\n\n'
             'The recipe to rewrite:\n${_json.text}',
       ),
     );
@@ -511,6 +517,9 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
         // The name is what step text refers to, so a rename has to move the
         // references with it and repaint the insert chips.
         onNameChanged: () => setState(_applyRenames),
+        // The density field only exists for units that can convert, so the
+        // row has to rebuild when the unit changes.
+        onUnitChanged: () => setState(() {}),
       ),
     _AddButton(label: 'Add ingredient', onPressed: _addIngredient),
 
@@ -556,6 +565,7 @@ class _IngredientDraft {
   final String id;
   final TextEditingController name;
   final TextEditingController amount;
+  final TextEditingController density;
   Unit? unit;
 
   /// The name the step text currently refers to this ingredient by. Empty for
@@ -566,15 +576,20 @@ class _IngredientDraft {
     required this.id,
     required String name,
     required String amount,
+    String density = '',
     this.unit,
   }) : name = TextEditingController(text: name),
        amount = TextEditingController(text: amount),
+       density = TextEditingController(text: density),
        knownAs = name.trim();
 
   factory _IngredientDraft.from(Ingredient ingredient) => _IngredientDraft(
     id: ingredient.id,
     name: ingredient.name,
     amount: formatAmount(ingredient.amount),
+    density: ingredient.densityGPerMl == null
+        ? ''
+        : formatAmount(ingredient.densityGPerMl!),
     unit: ingredient.unit,
   );
 
@@ -584,6 +599,7 @@ class _IngredientDraft {
   void dispose() {
     name.dispose();
     amount.dispose();
+    density.dispose();
   }
 }
 
@@ -717,12 +733,14 @@ class _IngredientRow extends StatelessWidget {
   final _IngredientDraft draft;
   final VoidCallback onRemove;
   final VoidCallback onNameChanged;
+  final VoidCallback onUnitChanged;
 
   const _IngredientRow({
     super.key,
     required this.draft,
     required this.onRemove,
     required this.onNameChanged,
+    required this.onUnitChanged,
   });
 
   @override
@@ -775,10 +793,38 @@ class _IngredientRow extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 10),
-                  Expanded(child: _UnitField(draft: draft)),
+                  Expanded(
+                    child: _UnitField(draft: draft, onChanged: onUnitChanged),
+                  ),
                 ],
               ),
             ),
+            // Its own line rather than a third column: three fields across a
+            // phone leaves none of them readable. Absent entirely for units
+            // that could never convert, where a density means nothing.
+            if (unitConverts(draft.unit)) ...[
+              const SizedBox(height: 10),
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: TextField(
+                  controller: draft.density,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                  ],
+                  decoration: const InputDecoration(
+                    labelText: 'Density (g/ml)',
+                    helperText:
+                        'Optional — lets this switch between weight '
+                        'and volume',
+                    isDense: true,
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -790,8 +836,9 @@ class _IngredientRow extends StatelessWidget {
 /// editor, which would take every other field's focus with it.
 class _UnitField extends StatefulWidget {
   final _IngredientDraft draft;
+  final VoidCallback onChanged;
 
-  const _UnitField({required this.draft});
+  const _UnitField({required this.draft, required this.onChanged});
 
   @override
   State<_UnitField> createState() => _UnitFieldState();
@@ -813,7 +860,10 @@ class _UnitFieldState extends State<_UnitField> {
         for (final unit in Unit.values)
           DropdownMenuItem(value: unit, child: Text(unitLabel(unit))),
       ],
-      onChanged: (unit) => setState(() => widget.draft.unit = unit),
+      onChanged: (unit) {
+        setState(() => widget.draft.unit = unit);
+        widget.onChanged();
+      },
     );
   }
 }

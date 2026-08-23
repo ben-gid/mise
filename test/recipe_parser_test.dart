@@ -103,4 +103,33 @@ void main() {
     );
     expect(errors, hasLength(greaterThan(1)));
   });
+
+  // A density outside culinary range is almost always an LLM emitting kg/m3
+  // (530) rather than g/ml (0.53), which would render flour as a teaspoon.
+  group('density', () {
+    String withDensity(Object? value) => mutated(
+      (r) => (r['ingredients'] as List)[0]['density_g_per_ml'] = value,
+    );
+
+    test('parses when present', () {
+      expect(parser.parse(validJson).ingredientById('0001')!.densityGPerMl, 0.53);
+    });
+
+    test('is optional, both absent and explicitly null', () {
+      final dropped = mutated(
+        (r) => (r['ingredients'] as List)[0].remove('density_g_per_ml'),
+      );
+      expect(parser.parse(dropped).ingredientById('0001')!.densityGPerMl, isNull);
+      expect(parser.parse(withDensity(null)).ingredientById('0001')!.densityGPerMl, isNull);
+    });
+
+    test('rejects a kg/m3 value', () {
+      expect(errorsOf(withDensity(530)).join(), contains('density_g_per_ml'));
+    });
+
+    test('rejects zero and negatives', () {
+      expect(errorsOf(withDensity(0)).join(), contains('density_g_per_ml'));
+      expect(errorsOf(withDensity(-1)).join(), contains('density_g_per_ml'));
+    });
+  });
 }

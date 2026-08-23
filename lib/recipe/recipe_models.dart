@@ -27,11 +27,18 @@ class Ingredient {
   final num amount;
   final Unit? unit;
 
+  /// Grams per millilitre, when the ingredient is measurable both ways.
+  /// Null is the norm for countable items and pinches, and means the amount
+  /// can only ever read in the dimension it was written in.
+  @JsonKey(name: 'density_g_per_ml')
+  final num? densityGPerMl;
+
   const Ingredient({
     required this.id,
     required this.name,
     required this.amount,
     this.unit,
+    this.densityGPerMl,
   });
 
   factory Ingredient.fromJson(Map<String, dynamic> json) =>

@@ -219,6 +219,98 @@ void main() {
     expect(find.textContaining('2 cups + 2 tbsp water'), findsOneWidget);
   });
 
+  testWidgets('tapping an amount switches just that ingredient', (
+    tester,
+  ) async {
+    addTearDown(() => measureBy.value = MeasureBy.asWritten);
+    await pumpDetail(tester);
+
+    // Flour carries a density, so it can leave the scale for a measuring cup.
+    expect(find.text('500 g'), findsOneWidget);
+    await tester.tap(find.text('500 g'));
+    await tester.pumpAndSettle();
+    // Marked approximate: it came through a density, not off a scale.
+    expect(find.text('943 ml'), findsOneWidget);
+    expect(find.text('500 g'), findsNothing);
+
+    // Only that one — the salt beside it is untouched.
+    expect(find.text('10 g'), findsOneWidget);
+
+    // The icon marks what can switch, and only that. Yeast is in teaspoons but
+    // carries no density, so it taps without offering one.
+    Finder rowOf(String amount) => find
+        .ancestor(of: find.text(amount), matching: find.byType(InkWell))
+        .first;
+    expect(
+      find.descendant(
+        of: rowOf('943 ml'),
+        matching: find.byIcon(Icons.swap_horiz),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: rowOf('5 ml'),
+        matching: find.byIcon(Icons.swap_horiz),
+      ),
+      findsNothing,
+    );
+
+    // The same tap goes back.
+    await tester.tap(find.text('943 ml'));
+    await tester.pumpAndSettle();
+    expect(find.text('500 g'), findsOneWidget);
+
+    // The step text carries no control of its own, so it has to follow.
+    await tester.tap(find.text('500 g'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Mix the dough'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('943 ml bread flour'), findsOneWidget);
+  });
+
+  testWidgets('an ingredient with no density says so rather than doing '
+      'nothing', (tester) async {
+    await pumpDetail(tester);
+
+    // Yeast is measured in teaspoons but carries no density, so there is
+    // nothing to convert through. No hover on a phone, so the tap has to talk.
+    // A teaspoon reads as 5 ml under the metric default.
+    await tester.tap(find.text('5 ml'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(SnackBar), findsOneWidget);
+    expect(
+      find.textContaining('No density for instant yeast'),
+      findsOneWidget,
+    );
+    expect(find.text('5 ml'), findsOneWidget); // unchanged
+
+    // ScaffoldMessenger queues, so the next one never shows until this one
+    // has served its four seconds.
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+
+    // A pinch fails for a different reason, and pointing it at the editor
+    // would be a lie — there is no density field for a unit with no size.
+    await tester.scrollUntilVisible(
+      find.text('1 pinch'),
+      100,
+      scrollable: find.byType(Scrollable).first,
+    );
+    // scrollUntilVisible stops as soon as the row is on screen, which here is
+    // underneath the translucent app bar the body scrolls behind. Nudge it out.
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, 140));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('1 pinch'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('No fixed size for flaky salt'), findsOneWidget);
+  });
+
   /// Opens the editor from the detail screen and waits for its fields.
   Future<void> openEditor(WidgetTester tester) async {
     await tester.tap(find.byIcon(Icons.edit_outlined));

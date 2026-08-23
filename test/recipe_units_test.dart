@@ -12,10 +12,12 @@ void main() {
   setUp(() {
     weightSystem.value = UnitSystem.imperial;
     volumeSystem.value = UnitSystem.imperial;
+    measureBy.value = MeasureBy.asWritten;
   });
   tearDown(() {
     weightSystem.value = UnitSystem.metric;
     volumeSystem.value = UnitSystem.metric;
+    measureBy.value = MeasureBy.asWritten;
   });
 
   test('metric leaves g and ml alone, without decimal noise', () {
@@ -170,7 +172,169 @@ void main() {
     expect(amountLabel(recipe.ingredients[1], 1), '1 lb');
   });
 
+  // -------------------------------------------------------------- density
+
+  group('density bridges the two dimensions', () {
+    // The canonical case: weighed on a scale, wanted in cups.
+    test('grams read as volume when the ingredient carries a density', () {
+      volumeSystem.value = UnitSystem.imperial;
+      measureBy.value = MeasureBy.volume;
+      expect(formatMeasure(500, Unit.g, density: 0.53), '4 cups');
+    });
+
+    // The more valuable direction: a recipe written in cups becomes weighable,
+    // which is what makes scaling it honest.
+    test('volume reads as grams', () {
+      weightSystem.value = UnitSystem.metric;
+      measureBy.value = MeasureBy.weight;
+      expect(formatMeasure(2, Unit.cup, density: 1.0), '473 g');
+    });
+
+    // The guard on every other expectation in this file: a density in the
+    // recipe changes nothing until a reader asks for the other dimension.
+    test('a density alone changes nothing under asWritten', () {
+      weightSystem.value = UnitSystem.metric;
+      volumeSystem.value = UnitSystem.metric;
+      expect(formatMeasure(500, Unit.g, density: 0.53), '500 g');
+      expect(formatMeasure(2, Unit.cup, density: 1.0), '473 ml');
+    });
+
+    test('without a density the setting is ignored rather than guessed at', () {
+      weightSystem.value = UnitSystem.metric;
+      measureBy.value = MeasureBy.volume;
+      expect(formatMeasure(500, Unit.g), '500 g');
+    });
+
+    test('pinch stays as written under every dimension', () {
+      for (final by in MeasureBy.values) {
+        measureBy.value = by;
+        expect(formatMeasure(1, Unit.pinch, density: 0.5), '1 pinch');
+      }
+    });
+
+    // The row highlight is the only thing that says "computed, not measured",
+    // so this predicate has to agree with what formatMeasure actually did.
+    test('isDerived marks exactly the values that crossed a dimension', () {
+      const water = Ingredient(
+        id: '0002',
+        name: 'water',
+        amount: 200,
+        unit: Unit.ml,
+        densityGPerMl: 1.0,
+      );
+      const eggs = Ingredient(id: '0005', name: 'eggs', amount: 2);
+
+      measureBy.value = MeasureBy.asWritten;
+      expect(isDerived(_flour), isFalse);
+      expect(isDerived(water), isFalse);
+      // A tap crosses it even when the setting hasn't.
+      expect(isDerived(_flour, flip: true), isTrue);
+
+      measureBy.value = MeasureBy.volume;
+      expect(isDerived(_flour), isTrue); // grams -> cups, computed
+      expect(isDerived(water), isFalse); // already volume, just relabelled
+      // Tapping a derived row back onto its stored unit is no longer derived.
+      expect(isDerived(_flour, flip: true), isFalse);
+
+      // No density, and nothing with a dimension to cross.
+      expect(isDerived(eggs), isFalse);
+      expect(
+        isDerived(
+          const Ingredient(
+            id: '1',
+            name: 'salt',
+            amount: 1,
+            unit: Unit.pinch,
+            densityGPerMl: 1.2,
+          ),
+        ),
+        isFalse,
+      );
+    });
+
+    test('flip inverts one ingredient against the global setting', () {
+      weightSystem.value = UnitSystem.metric;
+      volumeSystem.value = UnitSystem.metric;
+      expect(formatMeasure(500, Unit.g, density: 0.53), '500 g');
+      expect(formatMeasure(500, Unit.g, density: 0.53, flip: true), '943 ml');
+      // Flipping against a global that already asked for volume lands back on
+      // what the recipe actually says.
+      measureBy.value = MeasureBy.volume;
+      expect(formatMeasure(500, Unit.g, density: 0.53, flip: true), '500 g');
+    });
+
+    test('canConvert is false for anything with no fixed factor', () {
+      expect(canConvert(_flour), isTrue);
+      expect(
+        canConvert(
+          const Ingredient(id: '2', name: 'flour', amount: 500, unit: Unit.g),
+        ),
+        isFalse,
+      );
+      expect(
+        canConvert(
+          const Ingredient(
+            id: '3',
+            name: 'eggs',
+            amount: 2,
+            densityGPerMl: 1.0,
+          ),
+        ),
+        isFalse,
+      );
+      expect(
+        canConvert(
+          const Ingredient(
+            id: '4',
+            name: 'salt',
+            amount: 1,
+            unit: Unit.pinch,
+            densityGPerMl: 1.2,
+          ),
+        ),
+        isFalse,
+      );
+    });
+
+    // Steps carry no control of their own, so the inline refs have to follow
+    // whatever the ingredient row was tapped into.
+    test('a flipped ingredient changes the step text too', () {
+      weightSystem.value = UnitSystem.metric;
+      volumeSystem.value = UnitSystem.metric;
+      final recipe = Recipe(
+        title: 'Loaf',
+        description: '',
+        baseServings: 1,
+        ingredients: const [_flour],
+        steps: const [
+          RecipeStep(id: 's1', title: 'Mix', content: 'Add {0001}.'),
+        ],
+        tags: const [],
+        source: 'test',
+        createdAt: DateTime(2024),
+      );
+      final step = recipe.steps.first;
+      expect(renderContent(step, recipe, 1), 'Add 500 g flour.');
+      expect(
+        renderContent(step, recipe, 1, flipped: const {'0001'}),
+        'Add 943 ml flour.',
+      );
+      // And the share text shows the same numbers the screen does.
+      expect(
+        formatForSharing(recipe, 1, flipped: const {'0001'}),
+        contains('- 943 ml flour'),
+      );
+    });
+  });
 }
+
+const _flour = Ingredient(
+  id: '0001',
+  name: 'flour',
+  amount: 500,
+  unit: Unit.g,
+  densityGPerMl: 0.53,
+);
 
 /// Reads a rendered measurement back into millilitres, so a broken ladder rung
 /// fails the tolerance check instead of quietly shipping.

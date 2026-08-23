@@ -214,4 +214,7 @@ String _prompt(RecipeParser parser) =>
     'amount in the text.\n'
     '- Set timer_seconds whenever a step involves waiting: proofing, baking, '
     'resting, chilling, simmering.\n'
+    '- Set density_g_per_ml on every ingredient that could reasonably be '
+    'measured either way, so the reader can switch between weight and volume. '
+    'Omit it only for countable items and pinches.\n'
     '- created_at is the current time in ISO 8601.';

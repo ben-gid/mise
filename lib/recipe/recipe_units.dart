@@ -14,6 +14,13 @@ enum UnitSystem { metric, imperial }
 final weightSystem = ValueNotifier(UnitSystem.metric);
 final volumeSystem = ValueNotifier(UnitSystem.metric);
 
+/// Which *dimension* amounts are displayed in, where an ingredient carries a
+/// density and can be read either way. Orthogonal to the two systems above:
+/// this picks grams-or-millilitres, those pick how each of them reads.
+enum MeasureBy { asWritten, weight, volume }
+
+final measureBy = ValueNotifier(MeasureBy.asWritten);
+
 /// `1.0` -> "1", `166.666` -> "166.67".
 String formatAmount(num amount) {
   final rounded = (amount * 100).round() / 100;
@@ -48,25 +55,82 @@ const _mlPer = {
   Unit.flOz: 29.5735,
 };
 
+/// Whether a unit lands in one of the two canonical values at all. `pinch` and
+/// countable items don't, so no density can rescue them.
+bool unitConverts(Unit? unit) =>
+    unit != null && (_gramsPer.containsKey(unit) || _mlPer.containsKey(unit));
+
+/// Whether this ingredient can be shown in the other dimension at all — which
+/// is what decides if its amount offers a toggle.
+bool canConvert(Ingredient i) =>
+    i.densityGPerMl != null && unitConverts(i.unit);
+
 /// Renders [amount] of [unit] in the user's chosen system, rounded to
 /// measurements that exist in a kitchen ("¾ cup + 1½ tbsp").
 ///
-/// The stored unit only decides which dimension this is; the setting decides
-/// how it reads. `pinch` is the one unit with no factor, so it stays as written.
-String formatMeasure(num amount, Unit unit) {
-  if (_gramsPer[unit] case final factor?) {
-    final grams = amount * factor;
-    return weightSystem.value == UnitSystem.imperial
-        ? _weight(grams)
-        : '${_metric(grams)} g';
+/// The stored unit decides which dimension this *starts* in; [density] is what
+/// lets it cross into the other one, and [flip] inverts the choice for a single
+/// tapped ingredient. `pinch` has no factor either way, so it stays as written.
+/// The dimension the recipe stored an amount in, and the one it will render
+/// in: the global setting, with `asWritten` resolving to whatever was stored
+/// and [flip] inverting it for a single tapped row.
+///
+/// Null when the unit lands in neither factor map — `pinch` and countable
+/// items, which have no dimension to be in.
+({MeasureBy stored, MeasureBy target})? _dimensions(Unit unit, bool flip) {
+  final stored = _gramsPer.containsKey(unit)
+      ? MeasureBy.weight
+      : _mlPer.containsKey(unit)
+      ? MeasureBy.volume
+      : null;
+  if (stored == null) return null;
+  var target = switch (measureBy.value) {
+    MeasureBy.asWritten => stored,
+    final chosen => chosen,
+  };
+  if (flip) {
+    target = target == MeasureBy.weight ? MeasureBy.volume : MeasureBy.weight;
   }
-  if (_mlPer[unit] case final factor?) {
-    final millilitres = amount * factor;
-    return volumeSystem.value == UnitSystem.imperial
-        ? _volume(millilitres)
-        : '${_metricMl(millilitres)} ml';
+  return (stored: stored, target: target);
+}
+
+/// Whether this amount is computed through a density rather than read as the
+/// recipe stored it — true whether the crossing came from a tapped row or from
+/// the global setting. The row highlight is the only thing that says so, which
+/// is why this and [formatMeasure] must resolve the dimension the same way:
+/// both go through [_dimensions].
+bool isDerived(Ingredient i, {bool flip = false}) {
+  if (i.densityGPerMl == null || i.unit == null) return false;
+  final dimensions = _dimensions(i.unit!, flip);
+  return dimensions != null && dimensions.target != dimensions.stored;
+}
+
+String formatMeasure(num amount, Unit unit, {num? density, bool flip = false}) {
+  final dimensions = _dimensions(unit, flip);
+  // pinch, and anything else in neither factor map, reads as written.
+  if (dimensions == null) return '${_metric(amount)} ${unitLabel(unit)}';
+
+  var grams = _gramsPer[unit] == null ? null : amount * _gramsPer[unit]!;
+  var ml = _mlPer[unit] == null ? null : amount * _mlPer[unit]!;
+
+  // Density is the bridge between the two canonical values. Without one the
+  // target is ignored and the ingredient reads as stored — the same silent
+  // opt-out `pinch` already gets from the two factor maps.
+  if (density != null && dimensions.target != dimensions.stored) {
+    if (dimensions.target == MeasureBy.volume) {
+      (ml, grams) = (grams! / density, null);
+    } else {
+      (grams, ml) = (ml! * density, null);
+    }
   }
-  return '${_metric(amount)} ${unitLabel(unit)}';
+
+  return grams != null
+      ? (weightSystem.value == UnitSystem.imperial
+            ? _weight(grams)
+            : '${_metric(grams)} g')
+      : (volumeSystem.value == UnitSystem.imperial
+            ? _volume(ml!)
+            : '${_metricMl(ml!)} ml');
 }
 
 /// Whole numbers once an amount is big enough that a decimal is noise — a 1.33x
@@ -118,7 +182,9 @@ String _volume(num ml) {
   if (q == 0) return '${_metricMl(ml)} ml'; // under an eighth of a teaspoon
   final rungs = _rungs(q);
 
-  final nearest = rungs.reduce((a, b) => (a - q).abs() <= (b - q).abs() ? a : b);
+  final nearest = rungs.reduce(
+    (a, b) => (a - q).abs() <= (b - q).abs() ? a : b,
+  );
   if ((nearest - q).abs() <= q * _singleTermTolerance) return _label(nearest);
 
   // Two terms: floor onto the ladder, spend the remainder one step down.
@@ -128,8 +194,9 @@ String _volume(num ml) {
   // recipe reads. Take the half-tablespoon when it costs less than the same
   // tolerance a single term gets, and stay exact when it doesn't.
   final tbsp = (rem / 6).round() * 6;
-  final secondary =
-      tbsp >= 12 && (tbsp - rem).abs() <= q * _singleTermTolerance ? tbsp : rem;
+  final secondary = tbsp >= 12 && (tbsp - rem).abs() <= q * _singleTermTolerance
+      ? tbsp
+      : rem;
   // A second term worth under 2.5% of the first is noise — nobody adds ¼ tsp
   // of water to a cup. Below ~3 tbsp that same ¼ tsp does matter, which is why
   // the floor is relative and not a fixed amount.

@@ -24,6 +24,12 @@ Future<void> main() async {
   );
   weightSystem.value = savedUnit(0);
   volumeSystem.value = savedUnit(1);
+  // Appended third, so a sidecar written before this existed still reads —
+  // savedUnit's own bounds check is what makes that free.
+  measureBy.value = MeasureBy.values.firstWhere(
+    (by) => units.length > 2 && by.name == units[2],
+    orElse: () => MeasureBy.asWritten,
+  );
   runApp(RecipeApp(store: store, parser: parser));
 }
 
@@ -38,7 +44,12 @@ class RecipeApp extends StatelessWidget {
     // AnimatedBuilder over merged notifiers, not ValueListenableBuilder: a unit
     // change on the settings screen has to repaint the screens under it too.
     return AnimatedBuilder(
-      animation: Listenable.merge([themeMode, weightSystem, volumeSystem]),
+      animation: Listenable.merge([
+        themeMode,
+        weightSystem,
+        volumeSystem,
+        measureBy,
+      ]),
       builder: (context, _) => MaterialApp(
         title: 'Mise',
         theme: AppTheme.light,

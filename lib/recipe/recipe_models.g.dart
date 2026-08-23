@@ -11,6 +11,7 @@ Ingredient _$IngredientFromJson(Map<String, dynamic> json) => Ingredient(
   name: json['name'] as String,
   amount: json['amount'] as num,
   unit: $enumDecodeNullable(_$UnitEnumMap, json['unit']),
+  densityGPerMl: json['density_g_per_ml'] as num?,
 );
 
 Map<String, dynamic> _$IngredientToJson(Ingredient instance) =>
@@ -19,6 +20,7 @@ Map<String, dynamic> _$IngredientToJson(Ingredient instance) =>
       'name': instance.name,
       'amount': instance.amount,
       'unit': _$UnitEnumMap[instance.unit],
+      'density_g_per_ml': instance.densityGPerMl,
     };
 
 const _$UnitEnumMap = {

@@ -27,12 +27,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     widget.store.setThemeName(mode.name);
   }
 
-  /// Both systems go to disk together — they share one sidecar line.
+  /// All three settings go to disk together — they share one sidecar line.
+  void _saveUnits() => widget.store.setUnitSystems(
+    '${weightSystem.value.name},'
+    '${volumeSystem.value.name},'
+    '${measureBy.value.name}',
+  );
+
   void _pickUnit(ValueNotifier<UnitSystem> setting, UnitSystem system) {
     setState(() => setting.value = system);
-    widget.store.setUnitSystems(
-      '${weightSystem.value.name},${volumeSystem.value.name}',
-    );
+    _saveUnits();
+  }
+
+  void _pickMeasure(MeasureBy by) {
+    setState(() => measureBy.value = by);
+    _saveUnits();
   }
 
   @override
@@ -58,11 +67,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _units(weightSystem, metric: 'g', imperial: 'oz · lb'),
           _heading('Volume'),
           _units(volumeSystem, metric: 'ml', imperial: 'tsp · tbsp · cup'),
+          _heading('Measure by'),
+          _panel([
+            for (final (by, label, example) in const [
+              (MeasureBy.asWritten, 'As written', 'However each recipe saved it'),
+              (MeasureBy.weight, 'Weight', 'On a scale wherever it can be'),
+              (MeasureBy.volume, 'Volume', 'In cups and spoons wherever it can be'),
+            ])
+              ListTile(
+                title: Text(label),
+                subtitle: Text(example),
+                trailing: _check(by == measureBy.value),
+                onTap: () => _pickMeasure(by),
+              ),
+          ]),
           const Padding(
             padding: EdgeInsets.fromLTRB(28, 16, 28, 0),
             child: Text(
               'Recipes are stored as written and converted for display, '
-              'rounded to measurements you can actually scoop.',
+              'rounded to measurements you can actually scoop. Switching '
+              'between weight and volume needs a known density, so some '
+              'ingredients stay as written. Tap any amount to switch just '
+              'that one.',
             ),
           ),
         ],

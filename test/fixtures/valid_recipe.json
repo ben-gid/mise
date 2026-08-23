@@ -3,12 +3,36 @@
   "description": "Slow-proofed focaccia with a garlic butter crust.",
   "base_servings": 4,
   "ingredients": [
-    { "id": "0001", "name": "bread flour", "amount": 500, "unit": "g" },
-    { "id": "0002", "name": "water", "amount": 400, "unit": "ml" },
-    { "id": "0003", "name": "fine sea salt", "amount": 10, "unit": "g" },
+    {
+      "id": "0001",
+      "name": "bread flour",
+      "amount": 500,
+      "unit": "g",
+      "density_g_per_ml": 0.53
+    },
+    {
+      "id": "0002",
+      "name": "water",
+      "amount": 400,
+      "unit": "ml",
+      "density_g_per_ml": 1.0
+    },
+    {
+      "id": "0003",
+      "name": "fine sea salt",
+      "amount": 10,
+      "unit": "g",
+      "density_g_per_ml": 1.2
+    },
     { "id": "0004", "name": "instant yeast", "amount": 1, "unit": "tsp" },
     { "id": "0005", "name": "garlic cloves", "amount": 4, "unit": null },
-    { "id": "0006", "name": "butter", "amount": 60, "unit": "g" },
+    {
+      "id": "0006",
+      "name": "butter",
+      "amount": 60,
+      "unit": "g",
+      "density_g_per_ml": 0.91
+    },
     { "id": "0007", "name": "flaky salt", "amount": 1, "unit": "pinch" }
   ],
   "steps": [

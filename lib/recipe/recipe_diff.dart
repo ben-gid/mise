@@ -128,6 +128,7 @@ Iterable<RecipeChange> _ingredients(Recipe from, Recipe to) sync* {
       if (old.name != ingredient.name) 'name',
       if (formatAmount(old.amount) != formatAmount(ingredient.amount)) 'amount',
       if (old.unit != ingredient.unit) 'unit',
+      if (old.densityGPerMl != ingredient.densityGPerMl) 'density',
     ];
     if (moved.isEmpty) continue;
     yield (

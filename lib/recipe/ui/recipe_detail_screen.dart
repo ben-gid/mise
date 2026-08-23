@@ -38,6 +38,10 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
   late Recipe _recipe = widget.recipe;
 
   late int _servings = widget.recipe.baseServings;
+
+  /// Ingredients tapped into their other dimension. Deliberately not
+  /// persisted — this is "my scale is dirty, show me cups", not a preference.
+  final _flipped = <String>{};
   final _noteController = TextEditingController();
   int _stars = 0;
 
@@ -50,6 +54,27 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
       if (rating == null || !mounted) return;
       setState(() => _stars = rating.stars);
       _noteController.text = rating.note;
+    });
+  }
+
+  /// Flips one ingredient between weight and volume, for the length of this
+  /// visit. Ingredients with no density say so rather than doing nothing —
+  /// there is no hover on a phone, so this is the tooltip.
+  void _toggle(Ingredient ingredient) {
+    if (!canConvert(ingredient)) {
+      // Two different failures, and only one of them has a fix: a countable
+      // item or a pinch has no density field in the editor to go and fill in.
+      final message = unitConverts(ingredient.unit)
+          ? 'No density for ${ingredient.name}. Add one in Edit to switch it.'
+          : 'No fixed size for ${ingredient.name} — nothing to convert.';
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+      return;
+    }
+    // Block body, and Set.remove's return doubles as the membership test.
+    setState(() {
+      if (!_flipped.remove(ingredient.id)) _flipped.add(ingredient.id);
     });
   }
 
@@ -109,7 +134,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
     final box = context.findRenderObject() as RenderBox?;
     await SharePlus.instance.share(
       ShareParams(
-        text: formatForSharing(_recipe, _servings),
+        text: formatForSharing(_recipe, _servings, flipped: _flipped),
         subject: _recipe.title,
         sharePositionOrigin: box == null
             ? null
@@ -157,6 +182,15 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
           32,
         ),
         children: [
+          if (recipe.description.isNotEmpty) ...[
+            Text(recipe.description, style: theme.textTheme.bodyLarge),
+            const SizedBox(height: 16),
+          ],
+          _ServingsStepper(
+            servings: _servings,
+            onChanged: (value) => setState(() => _servings = value),
+          ),
+          const SizedBox(height: 24),
           Row(
             children: [
               for (var star = 1; star <= 5; star++)
@@ -184,42 +218,89 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
             onChanged: (_) => _save(),
           ),
           const SizedBox(height: 24),
-          if (recipe.description.isNotEmpty) ...[
-            Text(recipe.description, style: theme.textTheme.bodyLarge),
-            const SizedBox(height: 16),
-          ],
-          _ServingsStepper(
-            servings: _servings,
-            onChanged: (value) => setState(() => _servings = value),
-          ),
-          const SizedBox(height: 24),
           Text('Ingredients', style: theme.textTheme.titleLarge),
           const SizedBox(height: 8),
           for (final ingredient in recipe.ingredients)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 5),
-              // The amount sits in the run of text, so a long name wraps under
-              // it instead of into a narrow second column. It stays a
-              // WidgetSpan only so it can crossfade when the servings change;
-              // the baseline alignment is what keeps it reading as one line.
-              child: Text.rich(
-                TextSpan(
-                  children: [
-                    WidgetSpan(
-                      alignment: PlaceholderAlignment.baseline,
-                      baseline: TextBaseline.alphabetic,
-                      child: Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: _Amount(
-                          label: amountLabel(ingredient, factor),
-                          accent: accent,
+            InkWell(
+              // The whole line, not just the amount: one line is one
+              // ingredient, and a bare text run is a target too small for a
+              // hand that is also holding a bowl. InkWell rather than a bare
+              // GestureDetector so the row is reachable by keyboard and
+              // announced as a button — a detector is neither. Every row
+              // taps, including the ones that can't switch; those answer
+              // with a SnackBar rather than nothing.
+              onTap: () => _toggle(ingredient),
+              // The default focus overlay is invisible against the backdrop,
+              // and a keyboard user needs to see where they are.
+              focusColor: accent.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(pillRadius),
+              // The band sits inside the tap target rather than being it:
+              // trimming the box the InkWell owns would cost finger-sized,
+              // and two banded rows in a row need a gap or they fuse.
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 3),
+                // Ink, not a DecoratedBox, so it paints *on* the Material
+                // and the InkWell's focus and splash still land above it.
+                child: Ink(
+                  decoration: BoxDecoration(
+                    // Marks an amount computed through a density, not one the
+                    // reader tapped: a tap back onto the stored unit clears
+                    // it, and the setting lights a whole recipe at once.
+                    color:
+                        isDerived(
+                          ingredient,
+                          flip: _flipped.contains(ingredient.id),
+                        )
+                        ? accent.withValues(alpha: 0.10)
+                        : null,
+                    borderRadius: BorderRadius.circular(pillRadius),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 7, 8, 7),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          // The amount sits in the run of text, so a long name
+                          // wraps under it instead of into a narrow second
+                          // column. It stays a WidgetSpan only so it can
+                          // crossfade when the servings change; the baseline
+                          // alignment is what keeps it reading as one line.
+                          child: Text.rich(
+                            TextSpan(
+                              children: [
+                                WidgetSpan(
+                                  alignment: PlaceholderAlignment.baseline,
+                                  baseline: TextBaseline.alphabetic,
+                                  child: Padding(
+                                    padding: const EdgeInsets.only(right: 6),
+                                    child: _Amount(
+                                      label: amountLabel(
+                                        ingredient,
+                                        factor,
+                                        flip: _flipped.contains(
+                                          ingredient.id,
+                                        ),
+                                      ),
+                                      accent: accent,
+                                    ),
+                                  ),
+                                ),
+                                TextSpan(text: ingredient.name),
+                              ],
+                            ),
+                            style: theme.textTheme.bodyLarge,
+                          ),
                         ),
-                      ),
+                        if (canConvert(ingredient))
+                          Icon(
+                            Icons.swap_horiz,
+                            size: 20,
+                            color: accent.withValues(alpha: 0.75),
+                          ),
+                      ],
                     ),
-                    TextSpan(text: ingredient.name),
-                  ],
+                  ),
                 ),
-                style: theme.textTheme.bodyLarge,
               ),
             ),
           const SizedBox(height: 24),
@@ -231,6 +312,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
               step: step,
               recipe: recipe,
               factor: factor,
+              flipped: _flipped,
               accent: accent,
             ),
           if (recipe.notes case final notes? when notes.isNotEmpty) ...[
@@ -331,6 +413,7 @@ class _StepCard extends StatelessWidget {
   final RecipeStep step;
   final Recipe recipe;
   final double factor;
+  final Set<String> flipped;
   final Color accent;
 
   const _StepCard({
@@ -338,6 +421,7 @@ class _StepCard extends StatelessWidget {
     required this.step,
     required this.recipe,
     required this.factor,
+    required this.flipped,
     required this.accent,
   });
 
@@ -379,7 +463,7 @@ class _StepCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              renderContent(step, recipe, factor),
+              renderContent(step, recipe, factor, flipped: flipped),
               style: theme.textTheme.bodyLarge,
             ),
           ],
