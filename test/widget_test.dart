@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mise/recipe/recipe_models.dart';
 import 'package:mise/recipe/recipe_parser.dart';
 import 'package:mise/recipe/recipe_store.dart';
 import 'package:mise/recipe/recipe_units.dart';
@@ -40,6 +41,44 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 10));
     }
     fail('the store read never landed');
+  }
+
+  /// The recipe's name as the detail screen renders it — a real [Text], never
+  /// the editor's [EditableText].
+  ///
+  /// Doubles as the "this screen has rendered" signal: the name is the first
+  /// thing in the body, so unlike a section heading it is built whatever the
+  /// test viewport is.
+  Finder titleText(String title) =>
+      find.byWidgetPredicate((w) => w is Text && w.data == title);
+
+  /// to be scrolled to before it exists to tap or assert on.
+  /// [delta] is the step it scrolls by, so it is also how far past the target
+  /// this can overshoot — small steps when something above the target has to
+  /// stay built too.
+  Future<void> scrollTo(
+    WidgetTester tester,
+    Finder target, {
+    double delta = 200,
+  }) async {
+    await tester.scrollUntilVisible(
+      target,
+      delta,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
+  }
+
+  /// Gives the surface room for the whole recipe.
+  ///
+  /// The name and tags now open the page, so on a default 600px surface a
+  /// SliverList has not built the ingredient rows by the time a test looks for
+  /// them. A test about how an amount *reads* should not also be a test about
+  /// scrolling — the ones that genuinely exercise scrolling use [scrollTo].
+  void tallSurface(WidgetTester tester) {
+    tester.view.physicalSize = const Size(800, 2000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
   }
 
   /// Pumps the list screen and lets its real directory read finish.
@@ -137,16 +176,16 @@ void main() {
   Future<String> pumpDetail(
     WidgetTester tester, {
     bool Function()? ready,
+    String? json,
   }) async {
-    final id = (await tester.runAsync(
-      () => store.save(parser.parse(validJson)),
-    ))!;
+    final body = json ?? validJson;
+    final id = (await tester.runAsync(() => store.save(parser.parse(body))))!;
     await tester.runAsync(() async {
       await tester.pumpWidget(
         MaterialApp(
           home: RecipeDetailScreen(
             id: id,
-            recipe: parser.parse(validJson),
+            recipe: parser.parse(body),
             store: store,
             parser: parser,
           ),
@@ -154,12 +193,163 @@ void main() {
       );
       await pumpUntil(
         tester,
-        ready ?? () => find.text('Ingredients').evaluate().isNotEmpty,
+        ready ??
+            () => titleText('Garlic Butter Focaccia').evaluate().isNotEmpty,
       );
     });
     await tester.pumpAndSettle();
     return id;
   }
+
+  /// A real 1x1 PNG. The chain resolves through actual image decoding, so a
+  /// test that needs a photo to *succeed* has to hand it a real one — no https
+  /// url resolves in a test environment, which is what makes the failure path
+  /// free to test and the success path not.
+  const onePixelPng =
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAC'
+      'hwGA60e6kgAAAABJRU5ErkJggg==';
+
+  /// Pumps the detail screen for a recipe carrying [urls], waiting inside
+  /// `runAsync` until [settled] — the chain walks real network attempts, and
+  /// those need the real clock (see CLAUDE.md).
+  Future<void> pumpPhotos(
+    WidgetTester tester,
+    List<String> urls,
+    bool Function() settled,
+  ) async {
+    final recipe = Recipe.fromJson({
+      ...(jsonDecode(validJson) as Map<String, dynamic>),
+      'image_urls': urls,
+    });
+    final id = (await tester.runAsync(() => store.save(recipe)))!;
+    await tester.runAsync(() async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: RecipeDetailScreen(
+            id: id,
+            recipe: recipe,
+            store: store,
+            parser: parser,
+          ),
+        ),
+      );
+      await pumpUntil(
+        tester,
+        () =>
+            titleText('Garlic Butter Focaccia').evaluate().isNotEmpty &&
+            settled(),
+      );
+    });
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('a dead url falls through to the next one', (tester) async {
+    File('${dir.path}/photo.png').writeAsBytesSync(base64Decode(onePixelPng));
+
+    await pumpPhotos(
+      tester,
+      // The first never resolves in a test, so the chain has to walk past it.
+      const ['https://www.seriouseats.com/dead.jpg', 'mise://photo.png'],
+      () => find.text('Your photo').evaluate().isNotEmpty,
+    );
+
+    // Credited to the url that actually loaded, not the one ranked first.
+    expect(find.text('Your photo'), findsOneWidget);
+    expect(find.text('seriouseats.com'), findsNothing);
+
+    // The hero is open, so the bar stands well clear of a plain toolbar.
+    final open = tester.getSize(find.byType(FlexibleSpaceBar)).height;
+    expect(open, greaterThan(kToolbarHeight * 2));
+
+    // Scrolling closes it rather than sliding a second bar over it. The fog
+    // rides this, so a broken collapse would take it with it.
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, -260));
+    await tester.pumpAndSettle();
+    expect(
+      tester.getSize(find.byType(FlexibleSpaceBar)).height,
+      lessThan(open),
+    );
+    // The name must not live inside the hero. It did once, and the frost
+    // stacked above it blurred it away on exactly this scroll — while a
+    // findsWidgets assertion passed, because it was still in the tree.
+    expect(
+      find.descendant(
+        of: find.byType(FlexibleSpaceBar),
+        matching: find.text('Garlic Butter Focaccia'),
+      ),
+      findsNothing,
+    );
+  });
+
+  testWidgets('a recipe whose photos all fail reads as one with none', (
+    tester,
+  ) async {
+    await pumpPhotos(
+      tester,
+      const [
+        'https://a.example/1.jpg',
+        'https://b.example/2.jpg',
+        'https://c.example/3.jpg',
+      ],
+      // The credit walks each host and then disappears — that is the chain
+      // running out, and the only thing worth waiting on.
+      () => find.textContaining('.example').evaluate().isEmpty,
+    );
+
+    // Eased shut down to exactly the plain bar. No credit is left, because
+    // there is no photo to credit.
+    expect(
+      tester.getSize(find.byType(FlexibleSpaceBar)).height,
+      closeTo(kToolbarHeight, 1),
+    );
+    expect(find.textContaining('.example'), findsNothing);
+    expect(find.text('Garlic Butter Focaccia'), findsWidgets);
+  });
+
+  testWidgets('a recipe with no urls at all keeps the plain bar', (
+    tester,
+  ) async {
+    await pumpDetail(tester);
+
+    expect(find.byType(FlexibleSpaceBar), findsNothing);
+    expect(find.byType(SliverAppBar), findsOneWidget);
+  });
+
+  testWidgets('a long name wraps instead of truncating, and the tags lead', (
+    tester,
+  ) async {
+    const long = 'Slow-Proofed Rosemary and Sea Salt Focaccia';
+    final recipe = Recipe.fromJson({
+      ...(jsonDecode(validJson) as Map<String, dynamic>),
+      'title': long,
+    });
+    final id = (await tester.runAsync(() => store.save(recipe)))!;
+    await tester.runAsync(() async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: RecipeDetailScreen(
+            id: id,
+            recipe: recipe,
+            store: store,
+            parser: parser,
+          ),
+        ),
+      );
+      await pumpUntil(tester, () => titleText(long).evaluate().isNotEmpty);
+    });
+    await tester.pumpAndSettle();
+
+    // A toolbar could only ever have given this 56px. At 34/1.15 a line is
+    // ~39px, so clearing 60 is two lines that a truncating title never reaches.
+    expect(tester.getSize(find.text(long)).height, greaterThan(60));
+
+    // Tags name the hue the whole screen is drawn in, so they sit with the
+    // title rather than three screens below it.
+    expect(
+      tester.getTopLeft(find.text('bread')).dy,
+      lessThan(tester.getTopLeft(find.text('Ingredients')).dy),
+    );
+  });
 
   testWidgets('detail screen rescales amounts and step text live', (
     tester,
@@ -195,6 +385,7 @@ void main() {
       weightSystem.value = UnitSystem.metric;
       volumeSystem.value = UnitSystem.metric;
     });
+    tallSurface(tester);
     await pumpDetail(tester);
 
     // 500 g flour reads as a decimal off a scale; 400 ml water as a fraction
@@ -223,6 +414,7 @@ void main() {
     tester,
   ) async {
     addTearDown(() => measureBy.value = MeasureBy.asWritten);
+    tallSurface(tester);
     await pumpDetail(tester);
 
     // Flour carries a density, so it can leave the scale for a measuring cup.
@@ -275,6 +467,7 @@ void main() {
 
   testWidgets('an ingredient with no density says so rather than doing '
       'nothing', (tester) async {
+    tallSurface(tester);
     await pumpDetail(tester);
 
     // Yeast is measured in teaspoons but carries no density, so there is
@@ -284,10 +477,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(SnackBar), findsOneWidget);
-    expect(
-      find.textContaining('No density for instant yeast'),
-      findsOneWidget,
-    );
+    expect(find.textContaining('No density for instant yeast'), findsOneWidget);
     expect(find.text('5 ml'), findsOneWidget); // unchanged
 
     // ScaffoldMessenger queues, so the next one never shows until this one
@@ -319,8 +509,11 @@ void main() {
   }
 
   /// Taps Save version and waits for the detail screen to show the result.
-  /// Scoped to the AppBar because find.text also matches EditableText, so a
-  /// bare match would hit the editor's own field and race ahead of the save.
+  ///
+  /// Matched on the Text widget rather than on somewhere in the layout:
+  /// find.text also matches EditableText, so a bare match would hit the
+  /// editor's own field and race ahead of the save. Excluding it by type is
+  /// what the old AppBar scoping was standing in for.
   Future<void> saveVersion(WidgetTester tester, String expectTitle) async {
     await tester.runAsync(() async {
       await tester.tap(
@@ -328,7 +521,7 @@ void main() {
       );
       await pumpUntil(
         tester,
-        () => find.widgetWithText(AppBar, expectTitle).evaluate().isNotEmpty,
+        () => titleText(expectTitle).evaluate().isNotEmpty,
       );
     });
     await tester.pumpAndSettle();
@@ -357,16 +550,6 @@ void main() {
   });
 
   /// A ListView only builds near the viewport, so anything below the fold has
-  /// to be scrolled to before it exists to tap or assert on.
-  Future<void> scrollTo(WidgetTester tester, Finder target) async {
-    await tester.scrollUntilVisible(
-      target,
-      200,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.pumpAndSettle();
-  }
-
   testWidgets('steps show ingredients by name, never as {0001}', (
     tester,
   ) async {
@@ -409,15 +592,65 @@ void main() {
     // Nothing has been written — this is the editor keeping up, not a save.
     expect(await tester.runAsync(store.loadAll), hasLength(1));
 
-    // Renaming onto a name another ingredient already has holds instead of
-    // rewriting that one's references too.
+    // Renaming onto a name another ingredient already has moves *both*
+    // references: the two are duplicates now, so each picks up its id and the
+    // step has to say which is which. One keystroke, two labels.
     await tester.enterText(
       find.widgetWithText(TextField, 'Ingredient').first,
       'fine sea salt',
     );
     await tester.pumpAndSettle();
-    expect(find.textContaining('[strong white flour]'), findsOneWidget);
-    expect(find.textContaining('[fine sea salt]'), findsOneWidget);
+    expect(find.textContaining('[fine sea salt #0001]'), findsOneWidget);
+    expect(find.textContaining('[fine sea salt #0003]'), findsOneWidget);
+    // Never the bare form, which would name neither of them.
+    expect(find.textContaining('[fine sea salt],'), findsNothing);
+
+    // And back out again: alone once more, each drops its id.
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Ingredient').first,
+      'bread flour',
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('[bread flour], [fine sea salt]'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('#0001'), findsNothing);
+  });
+
+  testWidgets('two ingredients may share a name, and stay apart on save', (
+    tester,
+  ) async {
+    // Sugar for the sponge and sugar for the buttercream: an LLM splitting a
+    // recipe by component writes one name twice on purpose. Saving used to be
+    // refused outright, and before that quietly resolved both references to
+    // whichever came last.
+    final recipe = jsonDecode(validJson) as Map<String, dynamic>;
+    (recipe['ingredients'] as List).add({
+      'id': '0008',
+      'name': 'butter',
+      'amount': 20,
+      'unit': 'g',
+    });
+    (recipe['steps'] as List).add({
+      'id': 's5',
+      'title': 'Finish',
+      'content': 'Beat in {0008} off the heat.',
+      'timer_seconds': null,
+    });
+
+    await pumpDetail(tester, json: jsonEncode(recipe));
+    await openEditor(tester);
+    await saveVersion(tester, 'Garlic Butter Focaccia');
+
+    final saved = await tester.runAsync(store.loadAll);
+    final steps = {
+      for (final step in saved!.single.$2.steps) step.id: step.content,
+    };
+    // Opened and saved with no edit at all, both butters still point where
+    // they did — the round trip through bracket syntax is lossless.
+    expect(steps['s5'], 'Beat in {0008} off the heat.');
+    expect(steps['s3'], 'Melt {0006} with finely sliced {0005} over low heat.');
   });
 
   testWidgets('renaming an ingredient carries its step references along', (
@@ -448,7 +681,13 @@ void main() {
     await pumpDetail(tester);
     await openEditor(tester);
 
-    // The first close icon is the first ingredient's remove button.
+    // The first close icon is the first ingredient's remove button — below the
+    // fold in a test viewport, since the image field sits above the list.
+    await scrollTo(tester, find.byIcon(Icons.close).first);
+    // Same as the pinch row above: scrollUntilVisible stops as soon as it is on
+    // screen, which is underneath the app bar the body scrolls behind.
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, 140));
+    await tester.pumpAndSettle();
     await tester.tap(find.byIcon(Icons.close).first);
     await tester.pumpAndSettle();
     expect(find.textContaining('step 1'), findsOneWidget);
@@ -517,10 +756,7 @@ void main() {
       await tester.tap(find.text('Remove it'));
       await pumpUntil(
         tester,
-        () => find
-            .widgetWithText(AppBar, 'Garlic Butter Focaccia')
-            .evaluate()
-            .isNotEmpty,
+        () => titleText('Garlic Butter Focaccia').evaluate().isNotEmpty,
       );
     });
     await tester.pumpAndSettle();
@@ -537,10 +773,7 @@ void main() {
       await tester.tap(find.text('Save anyway'));
       await pumpUntil(
         tester,
-        () => find
-            .widgetWithText(AppBar, 'Garlic Butter Focaccia')
-            .evaluate()
-            .isNotEmpty,
+        () => titleText('Garlic Butter Focaccia').evaluate().isNotEmpty,
       );
     });
     await tester.pumpAndSettle();
@@ -605,7 +838,10 @@ void main() {
 
     await tester.runAsync(() async {
       await tester.tap(find.byIcon(Icons.history));
-      await pumpUntil(tester, () => find.text('Original').evaluate().isNotEmpty);
+      await pumpUntil(
+        tester,
+        () => find.text('Original').evaluate().isNotEmpty,
+      );
     });
     await tester.pumpAndSettle();
   }

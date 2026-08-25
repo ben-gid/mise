@@ -18,6 +18,7 @@ enum ChangeKind {
   description('description'),
   servings('servings'),
   notes('notes'),
+  image('image'),
   source('source'),
   order('step order');
 
@@ -70,6 +71,16 @@ Iterable<RecipeChange> _scalars(Recipe from, Recipe to) sync* {
       '${to.baseServings}',
     ),
     (ChangeKind.notes, 'Notes', from.notes, to.notes),
+    // Joined rather than set-diffed like tags, because these are *ordered*:
+    // promoting the second url to first is a real change that a set would
+    // report as none. Whole urls, not hosts — swapping one photo for another
+    // on the same site is a change too.
+    (
+      ChangeKind.image,
+      'Images',
+      from.imageUrls.join('\n'),
+      to.imageUrls.join('\n'),
+    ),
     (ChangeKind.source, 'Source', from.source, to.source),
   ];
   for (final (kind, label, before, after) in fields) {

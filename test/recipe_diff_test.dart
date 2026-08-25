@@ -154,7 +154,8 @@ void main() {
         kind: ChangeKind.step,
         label: 'Step 1',
         detail: 'wording',
-        before: 'Whisk [bread flour], [fine sea salt] and [instant yeast], '
+        before:
+            'Whisk [bread flour], [fine sea salt] and [instant yeast], '
             'then pour in [water] and mix to a shaggy dough.',
         after: 'Whisk [bread flour] and [fine sea salt] only.',
       ),
@@ -261,10 +262,49 @@ void main() {
         kind: ChangeKind.notes,
         label: 'Notes',
         detail: null,
-        before: 'The dough can rest overnight in the fridge instead of the '
+        before:
+            'The dough can rest overnight in the fridge instead of the '
             '2h bulk proof.',
         after: null,
       ),
     ]);
   });
+
+  test('a photo arriving is a change, not a silent one', () {
+    final after = edited(
+      (json) => json['image_urls'] = ['https://example.com/new.jpg'],
+    );
+
+    expect(diffRecipes(original(), after), [
+      (
+        kind: ChangeKind.image,
+        label: 'Images',
+        detail: null,
+        before: null, // the fixture carries no photos
+        after: 'https://example.com/new.jpg',
+      ),
+    ]);
+  });
+
+  test(
+    'reordering the photos is a change — the first one is the one shown',
+    () {
+      const a = 'https://a.example/1.jpg';
+      const b = 'https://b.example/2.jpg';
+      final before = edited((json) => json['image_urls'] = [a, b]);
+      final after = edited((json) => json['image_urls'] = [b, a]);
+
+      // Set-diffed like tags this would read as no change at all, and the
+      // recipe would silently be showing a different picture.
+      expect(diffRecipes(before, after), [
+        (
+          kind: ChangeKind.image,
+          label: 'Images',
+          detail: null,
+          before: '$a\n$b',
+          after: '$b\n$a',
+        ),
+      ]);
+    },
+  );
 }

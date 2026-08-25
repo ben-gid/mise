@@ -6,15 +6,19 @@ import 'package:flutter/material.dart';
 ///
 /// A dark kitchen at night: a static ember glow low on the screen, cool violet
 /// above, and glass panels standing in for the wiped-clear patches on a steamed
-/// pane. Recipes carry no image, so there is nothing to blur behind the glass —
-/// the backdrop is generated instead, and on the detail screen it takes its hue
-/// from the recipe's own tags.
+/// pane. The backdrop is generated rather than photographic, and on the detail
+/// screen it takes its hue from the recipe's own tags.
+///
+/// A recipe carrying a photo is the one place there is something real behind
+/// the glass: the detail screen's hero scrolls up under [frostPane], whose blur
+/// finally has an image to fog rather than a gradient to smooth.
 ///
 /// Two rules hold this together and are easy to break by accident:
 ///
 /// 1. **Blur once per screen.** A [BackdropFilter] per card is one blur pass per
-///    card per frame and will jank under Impeller. Only [glassAppBar] filters;
-///    [GlassPanel] is a flat translucent fill over the gradient.
+///    card per frame and will jank under Impeller. [frostPane] is the only
+///    thing that filters; [GlassPanel] is a flat translucent fill over the
+///    gradient.
 /// 2. **Nothing animates on its own.** An indefinite animation hangs
 ///    `pumpAndSettle` in widget tests (see CLAUDE.md), so the backdrop is
 ///    static. The only motion here is the finite amount crossfade on the
@@ -113,10 +117,15 @@ Color tagAccent(BuildContext context, List<String> tags) {
   final dark = _isDark(context);
   if (tags.isEmpty) return dark ? _ember : _emberDeep;
   final tag = tags.first.toLowerCase();
-  final hue = _tagHues[tag] ??
+  final hue =
+      _tagHues[tag] ??
       (tag.codeUnits.fold(0, (sum, unit) => sum + unit) % 360).toDouble();
-  return HSLColor.fromAHSL(1, hue, dark ? 0.72 : 0.62, dark ? 0.58 : 0.38)
-      .toColor();
+  return HSLColor.fromAHSL(
+    1,
+    hue,
+    dark ? 0.72 : 0.62,
+    dark ? 0.58 : 0.38,
+  ).toColor();
 }
 
 /// Ink for text sitting on a solid [tagAccent] fill. Derived rather than fixed,
@@ -205,6 +214,77 @@ double glassAppBarInset(BuildContext context) =>
     MediaQuery.paddingOf(context).top + kToolbarHeight;
 
 /// The one blurred surface in the app — content genuinely passes under it.
+///
+/// [opacity] ramps the whole pane, blur included, so the detail screen's hero
+/// can fog in as it collapses. At 0 the sigma is 0 too: a pane that isn't
+/// fogging shouldn't be paying for a blur pass either.
+///
+/// Deliberately not an animation. The hero drives this straight off its own
+/// layout extent, so the fog is a function of scroll position with no
+/// controller to dispose and nothing for `pumpAndSettle` to wait on.
+Widget frostPane(BuildContext context, {double opacity = 1}) {
+  final fill = glassFill(context);
+  final rim = glassRim(context);
+  return ClipRect(
+    child: BackdropFilter(
+      filter: ImageFilter.blur(sigmaX: 18 * opacity, sigmaY: 18 * opacity),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: fill.withValues(alpha: fill.a * opacity),
+          border: Border(
+            bottom: BorderSide(color: rim.withValues(alpha: rim.a * opacity)),
+          ),
+        ),
+        child: const SizedBox.expand(),
+      ),
+    ),
+  );
+}
+
+/// The art a recipe falls back to when it has no photo, or when the one it
+/// names won't load: its own tag hue, lit from the top left.
+///
+/// Shared so a dead url degrades to exactly what an imageless recipe already
+/// shows, rather than to a second, slightly different placeholder.
+LinearGradient coverGradient(Color accent) => LinearGradient(
+  begin: Alignment.topLeft,
+  end: Alignment.bottomRight,
+  colors: [
+    accent,
+    Color.alphaBlend(Colors.black.withValues(alpha: 0.28), accent),
+  ],
+);
+
+/// The wash over a hero photo, so a title stays readable on any picture.
+///
+/// Deepened toward the page floor rather than to neutral black, and carrying
+/// the recipe's own [tagAccent]. Every other surface here is lit by that hue —
+/// the backdrop, the amounts, the stars, the step numbers — so a neutral scrim
+/// would switch the recipe's colour off at the one place it is most itself, and
+/// would leave the hero reading as a rectangle pasted above the gradient rather
+/// than continuous with it. Kept to a cast rather than a wash: the photograph
+/// is still the thing being looked at.
+///
+/// Weighted at the **top**, where the toolbar's icons sit. The recipe's name is
+/// set in the page body rather than over the picture, so the bottom needs only
+/// enough to carry the credit line — anything heavier is a third of a
+/// photograph darkened for nothing.
+LinearGradient heroScrim(BuildContext context, Color accent) {
+  final floor = _isDark(context) ? _ink : _slate;
+  final tinted = Color.alphaBlend(accent.withValues(alpha: 0.30), floor);
+  return LinearGradient(
+    begin: Alignment.bottomCenter,
+    end: Alignment.topCenter,
+    colors: [
+      tinted.withValues(alpha: 0.55),
+      tinted.withValues(alpha: 0.15),
+      tinted.withValues(alpha: 0.06),
+      tinted.withValues(alpha: 0.45),
+    ],
+    stops: const [0, 0.28, 0.60, 1],
+  );
+}
+
 PreferredSizeWidget glassAppBar(
   BuildContext context, {
   required Widget title,
@@ -213,18 +293,7 @@ PreferredSizeWidget glassAppBar(
   return AppBar(
     title: title,
     actions: actions,
-    flexibleSpace: ClipRect(
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: glassFill(context),
-            border: Border(bottom: BorderSide(color: glassRim(context))),
-          ),
-          child: const SizedBox.expand(),
-        ),
-      ),
-    ),
+    flexibleSpace: frostPane(context),
   );
 }
 
@@ -322,20 +391,23 @@ class GlassPanel extends StatelessWidget {
 /// Weights come from the variable font's axes rather than from shipping a
 /// static cut per weight; `opsz` is clamped to the axis range the file declares.
 TextStyle _display(double size, double weight) => TextStyle(
-      fontFamily: 'Bricolage',
-      fontSize: size,
-      height: 1.15,
-      letterSpacing: -0.4,
-      fontVariations: [
-        FontVariation('wght', weight),
-        FontVariation('opsz', size.clamp(12, 72)),
-      ],
-    );
+  fontFamily: 'Bricolage',
+  fontSize: size,
+  height: 1.15,
+  letterSpacing: -0.4,
+  fontVariations: [
+    FontVariation('wght', weight),
+    FontVariation('opsz', size.clamp(12, 72)),
+  ],
+);
 
 TextTheme _textTheme(TextTheme base) => base.copyWith(
-      titleLarge: base.titleLarge?.merge(_display(24, 620)),
-      titleMedium: base.titleMedium?.merge(_display(18, 600)),
-    );
+  // The recipe's own name, and the only call that takes `opsz` anywhere near
+  // the range it was clamped for — everything else here sits at 18 or 24.
+  headlineMedium: base.headlineMedium?.merge(_display(34, 640)),
+  titleLarge: base.titleLarge?.merge(_display(24, 620)),
+  titleMedium: base.titleMedium?.merge(_display(18, 600)),
+);
 
 ThemeData _theme(ColorScheme scheme) {
   final base = ThemeData(colorScheme: scheme);

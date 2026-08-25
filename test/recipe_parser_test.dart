@@ -112,15 +112,24 @@ void main() {
     );
 
     test('parses when present', () {
-      expect(parser.parse(validJson).ingredientById('0001')!.densityGPerMl, 0.53);
+      expect(
+        parser.parse(validJson).ingredientById('0001')!.densityGPerMl,
+        0.53,
+      );
     });
 
     test('is optional, both absent and explicitly null', () {
       final dropped = mutated(
         (r) => (r['ingredients'] as List)[0].remove('density_g_per_ml'),
       );
-      expect(parser.parse(dropped).ingredientById('0001')!.densityGPerMl, isNull);
-      expect(parser.parse(withDensity(null)).ingredientById('0001')!.densityGPerMl, isNull);
+      expect(
+        parser.parse(dropped).ingredientById('0001')!.densityGPerMl,
+        isNull,
+      );
+      expect(
+        parser.parse(withDensity(null)).ingredientById('0001')!.densityGPerMl,
+        isNull,
+      );
     });
 
     test('rejects a kg/m3 value', () {
@@ -130,6 +139,62 @@ void main() {
     test('rejects zero and negatives', () {
       expect(errorsOf(withDensity(0)).join(), contains('density_g_per_ml'));
       expect(errorsOf(withDensity(-1)).join(), contains('density_g_per_ml'));
+    });
+  });
+
+  /// The urls arrive from an LLM, which is told to give three even where it is
+  /// unsure of any one of them — so this is a trust boundary, not a
+  /// convenience. Three is a cap, not a target.
+  group('image_urls', () {
+    String withImages(Object? value) => mutated((r) => r['image_urls'] = value);
+
+    test('is optional, and absent reads as none', () {
+      final dropped = mutated((r) => r.remove('image_urls'));
+      expect(parser.parse(dropped).imageUrls, isEmpty);
+      expect(parser.parse(validJson).imageUrls, isEmpty);
+    });
+
+    test('keeps three in the order it was given', () {
+      const urls = [
+        'https://a.example/1.jpg',
+        'https://b.example/2.jpg',
+        'https://c.example/3.jpg',
+      ];
+      expect(parser.parse(withImages(urls)).imageUrls, urls);
+    });
+
+    test('rejects a fourth', () {
+      final errors = errorsOf(
+        withImages([
+          'https://a.example/1.jpg',
+          'https://b.example/2.jpg',
+          'https://c.example/3.jpg',
+          'https://d.example/4.jpg',
+        ]),
+      );
+      expect(errors.join(), contains('image_urls'));
+    });
+
+    test("accepts the app's own scheme, for a photo off the device", () {
+      expect(parser.parse(withImages(['mise://1724500000000.jpg'])).imageUrls, [
+        'mise://1724500000000.jpg',
+      ]);
+    });
+
+    test('rejects cleartext http, which phones refuse to load', () {
+      expect(
+        errorsOf(withImages(['http://example.com/a.jpg'])).join(),
+        contains('image_urls'),
+      );
+    });
+
+    test('rejects a bad entry even behind good ones', () {
+      expect(
+        errorsOf(
+          withImages(['https://a.example/1.jpg', 'a photo of focaccia']),
+        ).join(),
+        contains('image_urls'),
+      );
     });
   });
 }

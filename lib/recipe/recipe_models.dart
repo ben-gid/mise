@@ -78,6 +78,17 @@ class Recipe {
   final List<Ingredient> ingredients;
   final List<RecipeStep> steps;
   final String? notes;
+
+  /// Photos of the finished dish, best first — `https` urls the LLM found, or a
+  /// single `mise://<filename>` pointing at a picked photo copied in beside the
+  /// recipes.
+  ///
+  /// A list because a guessed url is often dead: the app shows the first that
+  /// loads and treats the rest as fallbacks. Empty is the norm, and a recipe
+  /// whose urls all fail reads as one with no photo at all. See
+  /// `recipe_image.dart` for how a url becomes a picture.
+  @JsonKey(defaultValue: <String>[])
+  final List<String> imageUrls;
   final List<String> tags;
   final String source;
   final DateTime createdAt;
@@ -89,6 +100,7 @@ class Recipe {
     required this.ingredients,
     required this.steps,
     this.notes,
+    this.imageUrls = const [],
     required this.tags,
     required this.source,
     required this.createdAt,
