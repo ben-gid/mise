@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../recipe_image.dart';
 import '../recipe_parser.dart';
 import '../recipe_store.dart';
 import 'glass.dart';
@@ -36,10 +37,8 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
     final imported = await Navigator.push<SavedRecipe>(
       context,
       MaterialPageRoute(
-        builder: (_) => ImportRecipeScreen(
-          store: widget.store,
-          parser: widget.parser,
-        ),
+        builder: (_) =>
+            ImportRecipeScreen(store: widget.store, parser: widget.parser),
       ),
     );
     if (imported == null || !mounted) return;
@@ -208,7 +207,15 @@ class _RecipeRow extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
               child: Row(
                 children: [
-                  _Cover(letter: recipe.title[0].toUpperCase(), accent: accent),
+                  _Cover(
+                    letter: recipe.title[0].toUpperCase(),
+                    accent: accent,
+                    // First url only, no fallback chain: three network
+                    // attempts per row in a scrolling list is a real cost,
+                    // and the initial below is already the right answer at
+                    // 64px.
+                    image: imageFor(recipe.imageUrls.firstOrNull, store),
+                  ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -243,9 +250,9 @@ class _RecipeRow extends StatelessWidget {
               Divider(
                 height: 1,
                 thickness: 1,
-                // indent removed for now: possibly bring back
-                // when support for recipe image gets added
-                // indent: _dividerIndent,
+                // Starts at the title rather than the screen edge, so the run
+                // of covers down the left reads as its own column.
+                indent: _dividerIndent,
                 color: glassRim(context),
               ),
           ],
@@ -255,38 +262,46 @@ class _RecipeRow extends StatelessWidget {
   }
 }
 
-/// Recipes carry no image, so the cover is generated: the recipe's tag hue,
-/// lit from the top left, under the initial of its title.
+/// The recipe's photo, or — for a recipe that carries none, which is most of
+/// them — generated art: its tag hue, lit from the top left, under the initial
+/// of its title.
 class _Cover extends StatelessWidget {
   final String letter;
   final Color accent;
+  final ImageProvider? image;
 
-  const _Cover({required this.letter, required this.accent});
+  const _Cover({required this.letter, required this.accent, this.image});
 
   @override
   Widget build(BuildContext context) {
+    final initial = Text(
+      letter,
+      style: Theme.of(
+        context,
+      ).textTheme.titleMedium?.copyWith(fontSize: 22, color: onAccent(accent)),
+    );
     return Container(
       width: _coverSize,
       height: _coverSize,
       alignment: Alignment.center,
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(pillRadius),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            accent,
-            Color.alphaBlend(Colors.black.withValues(alpha: 0.28), accent),
-          ],
-        ),
+        gradient: coverGradient(accent),
       ),
-      child: Text(
-        letter,
-        style: Theme.of(context)
-            .textTheme
-            .titleMedium
-            ?.copyWith(fontSize: 22, color: onAccent(accent)),
-      ),
+      // The generated art stays underneath rather than being an alternative to
+      // the photo, so it is what shows through while the image loads and what
+      // is left if the url turns out to be dead. No loadingBuilder — a spinner
+      // per row would be dozens of indefinite animations (see CLAUDE.md).
+      child: image == null
+          ? initial
+          : Image(
+              image: image!,
+              width: _coverSize,
+              height: _coverSize,
+              fit: BoxFit.cover,
+              errorBuilder: (context, _, _) => initial,
+            ),
     );
   }
 }

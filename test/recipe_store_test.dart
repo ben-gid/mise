@@ -97,10 +97,16 @@ void main() {
     final first = await store.save(parser.parse(validJson));
     // Same title and same createdAt as its parent: without the stamp this
     // would regenerate the parent's own id and clobber it.
-    final second = await store.saveVersion(parser.parse(validJson), parent: first);
+    final second = await store.saveVersion(
+      parser.parse(validJson),
+      parent: first,
+    );
 
     expect(second.$1, isNot(first));
-    expect(second.$2.createdAt.isAfter(parser.parse(validJson).createdAt), isTrue);
+    expect(
+      second.$2.createdAt.isAfter(parser.parse(validJson).createdAt),
+      isTrue,
+    );
     expect(await store.loadAll(), hasLength(1));
     expect((await store.history(second.$1)), hasLength(2));
   });
@@ -121,10 +127,11 @@ void main() {
     expect(restored.$1, isNot(first));
     expect(File('${dir.path}/$first.json').existsSync(), isTrue);
     expect((await store.loadAll()).single.$1, restored.$1);
-    expect(
-      (await store.history(restored.$1)).map((s) => s.$2.title),
-      ['Garlic Butter Focaccia', 'Doubled', 'Garlic Butter Focaccia'],
-    );
+    expect((await store.history(restored.$1)).map((s) => s.$2.title), [
+      'Garlic Butter Focaccia',
+      'Doubled',
+      'Garlic Butter Focaccia',
+    ]);
   });
 
   test('deleting a recipe deletes its earlier versions too', () async {
@@ -154,7 +161,10 @@ void main() {
     File('${dir.path}/history.meta').writeAsStringSync('{"broken": ');
 
     // Both files survive and both list, rather than the recipe vanishing.
-    expect((await store.loadAll()).map((s) => s.$1), unorderedEquals([first, second.$1]));
+    expect(
+      (await store.loadAll()).map((s) => s.$1),
+      unorderedEquals([first, second.$1]),
+    );
     expect(await store.history(second.$1), hasLength(1));
   });
 

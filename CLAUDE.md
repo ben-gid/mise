@@ -51,6 +51,30 @@ substitutes them at render time with amounts scaled by the servings stepper. JSO
 can't express cross-references, so `RecipeParser` adds a post-validation pass rejecting
 `{id}` refs that don't resolve — a dangling ref would silently break scaling.
 
+**Nobody types `{0001}`, so the editor round-trips ids through names — and that
+round-trip has to be lossless.** `toDisplayRefs` renders a step as
+`Whisk [bread flour]` on open and `toIdRefs` converts back on save. Both key off
+`_labels` in [lib/recipe/recipe_refs.dart](lib/recipe/recipe_refs.dart), which is
+the bare name where it is unique and `name #id` where it is not, because a recipe
+split by component names one thing twice on purpose — sugar for the sponge, sugar
+for the buttercream. Keyed by bare name the two functions stopped being inverses:
+a Dart map literal keeps the *last* duplicate key, so opening and saving with no
+edit at all repointed the first step at the second sugar's amount and left the
+first orphaned. The editor used to refuse the save outright to dodge that; the
+labels are what let it go through. Adding a second way to write a reference would
+put that back, so a bracket's spelling comes from `_labels` or it comes from
+nowhere. The id rather than an ordinal: `#0005` survives deleting the row above
+it, `(2)` slides onto its neighbour and drags the step text along.
+
+One keystroke can move two labels — renaming an ingredient onto a name another
+already has makes *both* duplicates — so `_applyRenames` recomputes every label
+each time rather than diffing the one field that changed. Its single pass is safe
+only because a new label either has a different base name from every old one or
+carries a `#id` no bare old label can match; check that before changing how a
+label is spelled. A bare `[sugar]` typed by hand where two exist resolves to
+neither and is reported at save, which is what makes the insert chips (they write
+labels) the path that always works.
+
 **Units are display-only, and every amount goes through one function.** The stored recipe is
 never rewritten: `weightSystem`, `volumeSystem` and `measureBy` in
 [lib/recipe/recipe_units.dart](lib/recipe/recipe_units.dart) are `ValueNotifier`s — the same
@@ -96,6 +120,39 @@ measured on a scale, which shows `1 lb 9.1 oz` and has no decimal-pound mode at 
 `¾ cup + 1½ tbsp` — two terms, because snapping to one rung puts 200 ml 11% off. Imperial
 weight below ~½ oz stays in grams, where a tenth of an ounce is 13% of 5 g.
 
+**A recipe's photos are urls, and that is what keeps them cheap.** `image_urls`
+holds up to three, best first — `https` links the LLM found, or a single
+`mise://<filename>` for a photo picked off the device and copied in beside the
+recipes by `RecipeStore.addImage`. Three because the import prompt asks for a
+link *even where the model is unsure*: guessed blog CDN paths are hashed and
+dated and mostly 404, so the later entries are fallbacks. Because it is an
+ordinary list of strings, `saveVersion` carries it forward, the version diff
+sees it, and the editor round-trips it — none of which a binary `<id>.image`
+sidecar would have got for free. The urls are relative on purpose where local:
+iOS hands the app container a new UUID on every update, so an absolute path
+saved today is a dead path after the next release. `https` only, never `http` —
+phones block cleartext, so a url that could never load is rejected at the
+schema.
+
+[lib/recipe/recipe_image.dart](lib/recipe/recipe_image.dart) is the chokepoint,
+the way `amountLabel` is for amounts: `imageFor` turns a url into something
+paintable, `creditFor` turns it into the host shown under the photo, and
+`ImageChain` walks the list until one loads. The chain is **headless** — it
+resolves through the image cache without painting — because the detail screen
+*sizes its app bar* on the outcome, and a widget that rendered the chain and
+reported upwards would loop: child says exhausted, parent shrinks, child
+rebuilds, reports again. The detail screen and the editor preview each own one,
+which is what stops the preview and the hero disagreeing about which url wins.
+
+**A recipe whose photos all fail is a recipe with no photo.** The hero eases
+shut and the screen becomes the plain one, rather than sitting open on generated
+art in a picture's place. That art is still the *list thumbnail* fallback, where
+a 64px tile has nothing to collapse into. The list deliberately does not run the
+chain — three network attempts per row in a scrolling list is a real cost, and
+the title initial is the right answer at that size. Nothing deletes a photo: a
+deleted recipe leaves its file behind, because the list screen's Undo re-saves
+the recipe and would otherwise find the picture gone.
+
 **Storage is one JSON file per recipe** in the app documents dir, filename = id =
 `<createdAtMillis>-<title-slug>.json`. Recipes carry no id field of their own (the schema
 describes what an LLM emits, not how we file it), so `RecipeStore.loadAll` returns
@@ -125,6 +182,31 @@ constructed once in `main()` and passed down by constructor.
 - `setState(() => _field = someFuture)` silently asserts at runtime: the arrow body returns
   the assigned Future. Use a block body.
 - The model class is `RecipeStep`, not `Step`, because `material.Step` exists.
+- `image_picker` has no Linux implementation, so "Choose photo" throws
+  `MissingPluginException` on the desktop harness and answers with a SnackBar.
+  Expect that, the same way the share button degrades to `mailto:` there.
+- The detail screen is a `CustomScrollView`, not a `ListView`, and passes
+  `appBar: null` — a `SliverAppBar` is not a `PreferredSizeWidget`, so it cannot
+  go in `GlassScaffold.appBar`. Its frost is driven off `SliverLayoutBuilder`
+  constraints rather than a `ScrollController`, so it stays a function of layout
+  with nothing for `pumpAndSettle` to wait on. A recipe with no photo gets
+  `expandedHeight: null` and looks exactly like every other screen.
+- Anything put inside the detail screen's `flexibleSpace` sits **under**
+  `frostPane`'s `BackdropFilter` and gets blurred away as the hero collapses.
+  That is why the recipe's name is set in the page body — centred, wrapping,
+  `headlineMedium` — rather than in the bar, which could only ever give it
+  `kToolbarHeight`. A widget test asserting `findsWidgets` on it passes while it
+  is invisible; assert it is *not* a descendant of `FlexibleSpaceBar` instead.
+- That title block pushes the ingredient rows past a default 600px test surface,
+  where a `SliverList` has not built them yet. Tests about how an amount reads
+  call `tallSurface` rather than tuning scroll offsets; only tests genuinely
+  about scrolling use `scrollTo`.
+- A `SliverAppBar`'s height cannot be animated with `TweenAnimationBuilder` —
+  that is a box widget and the target is a sliver. The detail screen uses an
+  `AnimationController` with an `AnimatedBuilder` around the whole
+  `CustomScrollView` instead. Its frost divides by `expanded - collapsed`, which
+  reaches zero at the end of that animation; unguarded it puts a NaN straight
+  into the opacity.
 - `SharePlus.instance.share` needs a `sharePositionOrigin` rect or it throws on iPad, where
   the sheet is a popover that must be anchored. On Linux it degrades to a `mailto:` link —
   expect that when testing the share button on desktop, it isn't a bug.

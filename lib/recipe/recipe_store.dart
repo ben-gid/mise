@@ -150,6 +150,31 @@ class RecipeStore {
     await _ratingsFile.writeAsString(jsonEncode(ratings));
   }
 
+  /// Copies a picked photo in beside the recipes, returning the url to store
+  /// on the recipe as `image_url`.
+  ///
+  /// The url is relative on purpose. iOS hands the app container a new UUID on
+  /// every update, so an absolute path saved today is a dead path after the
+  /// next release — the recipe would keep pointing at a file that moved. The
+  /// `mise://` scheme is what tells [imageFor] to resolve against [dir].
+  ///
+  /// Named by timestamp, the same way recipe ids are.
+  // ponytail: a deleted or abandoned recipe leaves its photo behind. Deleting
+  // them would break the list screen's Undo, which re-saves the recipe and
+  // would find the photo gone. Sweep unreferenced files if storage matters.
+  Future<String> addImage(String sourcePath) async {
+    final dot = sourcePath.lastIndexOf('.');
+    final ext = dot == -1 ? '.jpg' : sourcePath.substring(dot);
+    final name = '${DateTime.now().millisecondsSinceEpoch}$ext';
+    await File(sourcePath).copy('${dir.path}/$name');
+    return 'mise://$name';
+  }
+
+  /// A picked photo by filename. Photos sit beside the recipes and are hidden
+  /// from [loadAll] by its `.json` filter, the same way the `.meta` sidecars
+  /// are — a photo saved as `.json` would show up as a corrupt recipe.
+  File imageFile(String name) => File('${dir.path}/$name');
+
   /// The theme the user picked, as a [ThemeMode] name, or null for never
   /// chosen. Plain text in its own `.meta` sidecar: one setting doesn't earn a
   /// JSON map, and an unreadable one falls back rather than failing.

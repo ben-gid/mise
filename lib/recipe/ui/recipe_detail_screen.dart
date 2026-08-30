@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../recipe_image.dart';
 import '../recipe_models.dart';
 import '../recipe_parser.dart';
 import '../recipe_scaling.dart';
@@ -31,7 +33,8 @@ class RecipeDetailScreen extends StatefulWidget {
   State<RecipeDetailScreen> createState() => _RecipeDetailScreenState();
 }
 
-class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
+class _RecipeDetailScreenState extends State<RecipeDetailScreen>
+    with SingleTickerProviderStateMixin {
   /// The version on screen. Editing swaps these for the newly saved version
   /// in place, rather than pushing another copy of this screen.
   late String _id = widget.id;
@@ -45,6 +48,23 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
   final _noteController = TextEditingController();
   int _stars = 0;
 
+  /// The recipe's photos, tried in order until one loads. Null until the first
+  /// [didChangeDependencies], which is the earliest an ImageConfiguration
+  /// exists to resolve against.
+  ImageChain? _photos;
+
+  /// What [_photos] was built for, so a theme or metrics change re-entering
+  /// [didChangeDependencies] doesn't restart the chain and re-open a hero that
+  /// has already closed.
+  List<String>? _photoUrls;
+
+  /// Eases the hero shut when every url has failed. Finite and runs at most
+  /// once per recipe, so `pumpAndSettle` still returns (see CLAUDE.md).
+  late final _close = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 200),
+  );
+
   @override
   void initState() {
     super.initState();
@@ -55,6 +75,29 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
       setState(() => _stars = rating.stars);
       _noteController.text = rating.note;
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _startPhotos();
+  }
+
+  /// Points the chain at whatever recipe is on screen, if it isn't already.
+  ///
+  /// Called again from [_adopt]: an edit that fixes a dead url has to reopen
+  /// the hero, not leave it shut on the previous version's failure.
+  void _startPhotos() {
+    if (listEquals(_photoUrls, _recipe.imageUrls)) return;
+    _photos?.dispose();
+    _photoUrls = _recipe.imageUrls;
+    _close.value = 0;
+    _photos = ImageChain(_recipe.imageUrls, widget.store, () {
+      if (!mounted) return;
+      setState(() {});
+      if (_photos?.exhausted ?? false) _close.forward();
+    });
+    _photos!.resolve(createLocalImageConfiguration(context));
   }
 
   /// Flips one ingredient between weight and volume, for the length of this
@@ -88,6 +131,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
       _stars = 0;
     });
     _noteController.clear();
+    _startPhotos();
   }
 
   Future<void> _edit() async {
@@ -118,6 +162,8 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
   @override
   void dispose() {
     _noteController.dispose();
+    _photos?.dispose();
+    _close.dispose();
     super.dispose();
   }
 
@@ -153,185 +199,366 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen> {
 
     return GlassScaffold(
       tint: accent,
-      appBar: glassAppBar(
-        context,
-        title: Text(recipe.title),
-        actions: [
-          IconButton(
-            onPressed: _openHistory,
-            tooltip: 'Version history',
-            icon: const Icon(Icons.history),
-          ),
-          IconButton(
-            onPressed: _edit,
-            tooltip: 'Edit recipe',
-            icon: const Icon(Icons.edit_outlined),
-          ),
-          IconButton(
-            onPressed: _share,
-            tooltip: 'Share recipe',
-            icon: const Icon(Icons.share),
-          ),
-        ],
-      ),
-      body: ListView(
-        padding: EdgeInsets.fromLTRB(
-          16,
-          16 + glassAppBarInset(context),
-          16,
-          32,
-        ),
-        children: [
-          if (recipe.description.isNotEmpty) ...[
-            Text(recipe.description, style: theme.textTheme.bodyLarge),
-            const SizedBox(height: 16),
-          ],
-          _ServingsStepper(
-            servings: _servings,
-            onChanged: (value) => setState(() => _servings = value),
-          ),
-          const SizedBox(height: 24),
-          Row(
-            children: [
-              for (var star = 1; star <= 5; star++)
-                IconButton(
-                  // Tapping the current rating clears it — no extra button.
-                  onPressed: () {
-                    setState(() => _stars = _stars == star ? 0 : star);
-                    _save();
-                  },
-                  icon: Icon(
-                    star <= _stars ? Icons.star : Icons.star_border,
-                    color: star <= _stars ? accent : null,
+      // No `appBar`: the photo has to scroll *under* the bar rather than sit
+      // below it, and Scaffold.appBar only takes a PreferredSizeWidget.
+      //
+      // ponytail: this rebuilds the whole scroll view for the 200ms the hero
+      // spends closing. A sliver-typed wrapper if it ever shows up in a trace.
+      body: AnimatedBuilder(
+        animation: _close,
+        builder: (context, _) => CustomScrollView(
+          slivers: [
+            _hero(context, accent),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+              sliver: SliverList.list(
+                children: [
+                  // The recipe's name, and what kind of thing it is. Centred
+                  // and free to wrap: a toolbar could only ever give it 56px,
+                  // which is two lines and a truncation.
+                  Text(
+                    recipe.title,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.headlineMedium,
                   ),
-                ),
-            ],
-          ),
-          TextField(
-            controller: _noteController,
-            minLines: 1,
-            maxLines: 3,
-            decoration: const InputDecoration(
-              labelText: 'My note',
-              border: OutlineInputBorder(),
-            ),
-            onChanged: (_) => _save(),
-          ),
-          const SizedBox(height: 24),
-          Text('Ingredients', style: theme.textTheme.titleLarge),
-          const SizedBox(height: 8),
-          for (final ingredient in recipe.ingredients)
-            InkWell(
-              // The whole line, not just the amount: one line is one
-              // ingredient, and a bare text run is a target too small for a
-              // hand that is also holding a bowl. InkWell rather than a bare
-              // GestureDetector so the row is reachable by keyboard and
-              // announced as a button — a detector is neither. Every row
-              // taps, including the ones that can't switch; those answer
-              // with a SnackBar rather than nothing.
-              onTap: () => _toggle(ingredient),
-              // The default focus overlay is invisible against the backdrop,
-              // and a keyboard user needs to see where they are.
-              focusColor: accent.withValues(alpha: 0.14),
-              borderRadius: BorderRadius.circular(pillRadius),
-              // The band sits inside the tap target rather than being it:
-              // trimming the box the InkWell owns would cost finger-sized,
-              // and two banded rows in a row need a gap or they fuse.
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 3),
-                // Ink, not a DecoratedBox, so it paints *on* the Material
-                // and the InkWell's focus and splash still land above it.
-                child: Ink(
-                  decoration: BoxDecoration(
-                    // Marks an amount computed through a density, not one the
-                    // reader tapped: a tap back onto the stored unit clears
-                    // it, and the setting lights a whole recipe at once.
-                    color:
-                        isDerived(
-                          ingredient,
-                          flip: _flipped.contains(ingredient.id),
-                        )
-                        ? accent.withValues(alpha: 0.10)
-                        : null,
-                    borderRadius: BorderRadius.circular(pillRadius),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(8, 7, 8, 7),
-                    child: Row(
+                  if (recipe.tags.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    // Up here rather than at the foot of the page: tagAccent
+                    // draws the whole screen's colour from the first of these,
+                    // so this is where the hue gets explained.
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      spacing: 8,
+                      runSpacing: 8,
                       children: [
-                        Expanded(
-                          // The amount sits in the run of text, so a long name
-                          // wraps under it instead of into a narrow second
-                          // column. It stays a WidgetSpan only so it can
-                          // crossfade when the servings change; the baseline
-                          // alignment is what keeps it reading as one line.
-                          child: Text.rich(
-                            TextSpan(
-                              children: [
-                                WidgetSpan(
-                                  alignment: PlaceholderAlignment.baseline,
-                                  baseline: TextBaseline.alphabetic,
-                                  child: Padding(
-                                    padding: const EdgeInsets.only(right: 6),
-                                    child: _Amount(
-                                      label: amountLabel(
-                                        ingredient,
-                                        factor,
-                                        flip: _flipped.contains(
-                                          ingredient.id,
-                                        ),
-                                      ),
-                                      accent: accent,
-                                    ),
-                                  ),
-                                ),
-                                TextSpan(text: ingredient.name),
-                              ],
-                            ),
-                            style: theme.textTheme.bodyLarge,
-                          ),
-                        ),
-                        if (canConvert(ingredient))
-                          Icon(
-                            Icons.swap_horiz,
-                            size: 20,
-                            color: accent.withValues(alpha: 0.75),
-                          ),
+                        for (final tag in recipe.tags) Chip(label: Text(tag)),
                       ],
                     ),
+                  ],
+                  const SizedBox(height: 28),
+                  if (recipe.description.isNotEmpty) ...[
+                    Text(recipe.description, style: theme.textTheme.bodyLarge),
+                    const SizedBox(height: 16),
+                  ],
+                  _ServingsStepper(
+                    servings: _servings,
+                    onChanged: (value) => setState(() => _servings = value),
                   ),
-                ),
+                  const SizedBox(height: 24),
+                  Row(
+                    children: [
+                      for (var star = 1; star <= 5; star++)
+                        IconButton(
+                          // Tapping the current rating clears it — no extra button.
+                          onPressed: () {
+                            setState(() => _stars = _stars == star ? 0 : star);
+                            _save();
+                          },
+                          icon: Icon(
+                            star <= _stars ? Icons.star : Icons.star_border,
+                            color: star <= _stars ? accent : null,
+                          ),
+                        ),
+                    ],
+                  ),
+                  TextField(
+                    controller: _noteController,
+                    minLines: 1,
+                    maxLines: 3,
+                    decoration: const InputDecoration(
+                      labelText: 'My note',
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (_) => _save(),
+                  ),
+                  const SizedBox(height: 24),
+                  Text('Ingredients', style: theme.textTheme.titleLarge),
+                  const SizedBox(height: 8),
+                  for (final ingredient in recipe.ingredients)
+                    InkWell(
+                      // The whole line, not just the amount: one line is one
+                      // ingredient, and a bare text run is a target too small for a
+                      // hand that is also holding a bowl. InkWell rather than a bare
+                      // GestureDetector so the row is reachable by keyboard and
+                      // announced as a button — a detector is neither. Every row
+                      // taps, including the ones that can't switch; those answer
+                      // with a SnackBar rather than nothing.
+                      onTap: () => _toggle(ingredient),
+                      // The default focus overlay is invisible against the backdrop,
+                      // and a keyboard user needs to see where they are.
+                      focusColor: accent.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(pillRadius),
+                      // The band sits inside the tap target rather than being it:
+                      // trimming the box the InkWell owns would cost finger-sized,
+                      // and two banded rows in a row need a gap or they fuse.
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 3),
+                        // Ink, not a DecoratedBox, so it paints *on* the Material
+                        // and the InkWell's focus and splash still land above it.
+                        child: Ink(
+                          decoration: BoxDecoration(
+                            // Marks an amount computed through a density, not one the
+                            // reader tapped: a tap back onto the stored unit clears
+                            // it, and the setting lights a whole recipe at once.
+                            color:
+                                isDerived(
+                                  ingredient,
+                                  flip: _flipped.contains(ingredient.id),
+                                )
+                                ? accent.withValues(alpha: 0.10)
+                                : null,
+                            borderRadius: BorderRadius.circular(pillRadius),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(8, 7, 8, 7),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  // The amount sits in the run of text, so a long name
+                                  // wraps under it instead of into a narrow second
+                                  // column. It stays a WidgetSpan only so it can
+                                  // crossfade when the servings change; the baseline
+                                  // alignment is what keeps it reading as one line.
+                                  child: Text.rich(
+                                    TextSpan(
+                                      children: [
+                                        WidgetSpan(
+                                          alignment:
+                                              PlaceholderAlignment.baseline,
+                                          baseline: TextBaseline.alphabetic,
+                                          child: Padding(
+                                            padding: const EdgeInsets.only(
+                                              right: 6,
+                                            ),
+                                            child: _Amount(
+                                              label: amountLabel(
+                                                ingredient,
+                                                factor,
+                                                flip: _flipped.contains(
+                                                  ingredient.id,
+                                                ),
+                                              ),
+                                              accent: accent,
+                                            ),
+                                          ),
+                                        ),
+                                        TextSpan(text: ingredient.name),
+                                      ],
+                                    ),
+                                    style: theme.textTheme.bodyLarge,
+                                  ),
+                                ),
+                                if (canConvert(ingredient))
+                                  Icon(
+                                    Icons.swap_horiz,
+                                    size: 20,
+                                    color: accent.withValues(alpha: 0.75),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 24),
+                  Text('Steps', style: theme.textTheme.titleLarge),
+                  const SizedBox(height: 8),
+                  for (final (index, step) in recipe.steps.indexed)
+                    _StepCard(
+                      number: index + 1,
+                      step: step,
+                      recipe: recipe,
+                      factor: factor,
+                      flipped: _flipped,
+                      accent: accent,
+                    ),
+                  if (recipe.notes case final notes? when notes.isNotEmpty) ...[
+                    const SizedBox(height: 24),
+                    Text('Notes', style: theme.textTheme.titleLarge),
+                    const SizedBox(height: 8),
+                    Text(notes, style: theme.textTheme.bodyLarge),
+                  ],
+                  const SizedBox(height: 16),
+                  Text(
+                    'Source: ${recipe.source}',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ],
               ),
             ),
-          const SizedBox(height: 24),
-          Text('Steps', style: theme.textTheme.titleLarge),
-          const SizedBox(height: 8),
-          for (final (index, step) in recipe.steps.indexed)
-            _StepCard(
-              number: index + 1,
-              step: step,
-              recipe: recipe,
-              factor: factor,
-              flipped: _flipped,
-              accent: accent,
-            ),
-          if (recipe.notes case final notes? when notes.isNotEmpty) ...[
-            const SizedBox(height: 24),
-            Text('Notes', style: theme.textTheme.titleLarge),
-            const SizedBox(height: 8),
-            Text(notes, style: theme.textTheme.bodyLarge),
           ],
-          if (recipe.tags.isNotEmpty) ...[
-            const SizedBox(height: 24),
-            Wrap(
-              spacing: 8,
-              children: [for (final tag in recipe.tags) Chip(label: Text(tag))],
-            ),
-          ],
-          const SizedBox(height: 16),
-          Text('Source: ${recipe.source}', style: theme.textTheme.bodySmall),
-        ],
+        ),
       ),
+    );
+  }
+
+  /// The bar, and the photo behind it when there is one.
+  ///
+  /// Without any urls this is exactly the bar the rest of the app uses. With
+  /// them, the photo scrolls up under a frost that fogs in as it goes — the
+  /// blur in [frostPane] has spent this app's whole life smoothing a gradient,
+  /// and a photograph is the first thing it has had to actually fog.
+  ///
+  /// When every url turns out to be dead the hero eases shut and this becomes
+  /// the plain bar: a recipe whose photos don't load is a recipe with no photo,
+  /// not one wearing generated art in a picture's place.
+  Widget _hero(BuildContext context, Color accent) {
+    final actions = [
+      IconButton(
+        onPressed: _openHistory,
+        tooltip: 'Version history',
+        icon: const Icon(Icons.history),
+      ),
+      IconButton(
+        onPressed: _edit,
+        tooltip: 'Edit recipe',
+        icon: const Icon(Icons.edit_outlined),
+      ),
+      IconButton(
+        onPressed: _share,
+        tooltip: 'Share recipe',
+        icon: const Icon(Icons.share),
+      ),
+    ];
+
+    if (_recipe.imageUrls.isEmpty) {
+      // Pixel-identical to what every other screen shows. A recipe with no
+      // photo pays nothing for a feature it isn't using.
+      return SliverAppBar(
+        pinned: true,
+        actions: actions,
+        flexibleSpace: frostPane(context),
+      );
+    }
+
+    final collapsed = MediaQuery.paddingOf(context).top + kToolbarHeight;
+    // A third of the screen: enough that the photo is the thing you land on,
+    // little enough that a recipe read at a counter is still one thumb-scroll
+    // from its ingredients. Clamped so a phone in landscape isn't all picture
+    // and a tablet gets its extra room.
+    final full = (MediaQuery.sizeOf(context).height * 0.32).clamp(220.0, 340.0);
+    // Rides _close down to the toolbar when the chain gives up. At the bottom
+    // the SliverAppBar is already shaped exactly like the plain one, so there
+    // is no second widget to cross-fade into.
+    final expanded = full - (full - collapsed) * _close.value;
+    final winner = _photos?.winner;
+
+    // SliverLayoutBuilder, not a ScrollController: the fog is a function of how
+    // far this sliver has scrolled, which layout already knows. The only thing
+    // that animates is _close, which is finite (see CLAUDE.md).
+    return SliverLayoutBuilder(
+      builder: (context, constraints) {
+        // Goes to zero as the hero closes, and dividing by it would put a NaN
+        // straight into the frost's opacity.
+        final span = expanded - collapsed;
+        final open = span <= 0
+            ? 0.0
+            : (1 - constraints.scrollOffset / span).clamp(0.0, 1.0);
+        return SliverAppBar(
+          pinned: true,
+          expandedHeight: expanded,
+          // Icons ride from white over the photo to the page's own ink over the
+          // frost. A fixed colour loses one end or the other: white vanishes
+          // into the light theme's frost, and slate vanishes into a dark photo.
+          foregroundColor: Color.lerp(
+            Theme.of(context).colorScheme.onSurface,
+            Colors.white,
+            open,
+          ),
+          flexibleSpace: Stack(
+            fit: StackFit.expand,
+            children: [
+              FlexibleSpaceBar(
+                // No `title`. It used to sit here and get blurred away by the
+                // frost stacked above — the recipe's name is set in the page
+                // body now, where it can wrap instead of ellipsising.
+                background: _HeroImage(
+                  image: imageFor(winner, widget.store),
+                  accent: accent,
+                  // The url that actually loaded, not the one ranked first.
+                  credit: creditFor(winner),
+                ),
+              ),
+              frostPane(context, opacity: 1 - open),
+            ],
+          ),
+          actions: actions,
+        );
+      },
+    );
+  }
+}
+
+/// The photo, its wash, and the line saying where it came from.
+class _HeroImage extends StatelessWidget {
+  /// Null once every url has failed. The hero is on its way shut by then, so
+  /// there is nothing to put in the picture's place.
+  final ImageProvider? image;
+  final Color accent;
+  final String? credit;
+
+  const _HeroImage({
+    required this.image,
+    required this.accent,
+    required this.credit,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        if (image case final image?)
+          Image(
+            image: image,
+            fit: BoxFit.cover,
+            // The chain owns the fallback, so a failure here just yields and
+            // lets it move to the next url — never a red box.
+            errorBuilder: (context, _, _) => const SizedBox.shrink(),
+            // Deliberately no loadingBuilder. A spinner here is an indefinite
+            // animation, and pumpAndSettle never returns on one (CLAUDE.md).
+          ),
+        DecoratedBox(
+          decoration: BoxDecoration(gradient: heroScrim(context, accent)),
+        ),
+        if (credit case final credit?)
+          // The corner a photo credit belongs in. It had to clear the title
+          // above it once; nothing sits over the picture now but the toolbar.
+          Positioned(left: 16, right: 16, bottom: 16, child: _Credit(credit)),
+      ],
+    );
+  }
+}
+
+/// Where the picture came from. Small, letterspaced and held back — this is
+/// attribution, and it answers "is this the dish, or a stock photo?" without
+/// competing with the title underneath it.
+///
+/// White in both themes: the scrim it sits on is deepened toward the page floor
+/// either way, so this is always ink on a dark ground.
+class _Credit extends StatelessWidget {
+  final String text;
+
+  const _Credit(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    final ink = Colors.white.withValues(alpha: 0.78);
+    return Row(
+      children: [
+        Icon(Icons.photo_camera_outlined, size: 13, color: ink),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(
+              context,
+            ).textTheme.labelSmall?.copyWith(color: ink, letterSpacing: 0.6),
+          ),
+        ),
+      ],
     );
   }
 }

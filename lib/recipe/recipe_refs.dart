@@ -17,39 +17,81 @@ final _idRef = RegExp(r'\{(\w+)\}');
 /// editor can paint these spans without re-deriving the syntax.
 final nameRefPattern = RegExp(r'\[([^\[\]]+)\]');
 
+/// What each ingredient is called in bracket syntax, by id.
+///
+/// The bare name where it is the only one — which is every ingredient in
+/// almost every recipe. Where it is not, the id is appended, because an LLM
+/// splitting a recipe by component writes "sugar" twice on purpose: once for
+/// the sponge and once for the buttercream. Two brackets both reading
+/// `[sugar]` could not say which was meant, and [toIdRefs] would quietly
+/// resolve them both to whichever ingredient came last — pointing a step at
+/// the wrong amount, which is the failure this whole mechanism exists to
+/// prevent.
+///
+/// The id rather than an ordinal: `#0005` still names the same ingredient
+/// after one above it is deleted, where `(2)` would slide onto its neighbour
+/// and take the step text with it.
+Map<String, String> _labels(List<Ingredient> ingredients) {
+  final counts = <String, int>{};
+  for (final i in ingredients) {
+    counts.update(i.name.trim(), (n) => n + 1, ifAbsent: () => 1);
+  }
+  return {
+    for (final i in ingredients)
+      // An unnamed ingredient — only reachable as a half-typed editor draft,
+      // the schema requires a name — has nothing to be referred to by.
+      i.id: i.name.trim().isEmpty
+          ? ''
+          : counts[i.name.trim()] == 1
+          ? i.name.trim()
+          : '${i.name.trim()} #${i.id}',
+  };
+}
+
+/// The labels of [ingredients], in order — what the editor offers to insert.
+List<String> labelsFor(List<Ingredient> ingredients) {
+  final labels = _labels(ingredients);
+  return [for (final i in ingredients) labels[i.id]!];
+}
+
 /// `Whisk {0001}` -> `Whisk [bread flour]`.
 ///
 /// An id with no ingredient is left as written, the way [renderContent] leaves
 /// it: import already rejects those, and rewriting one would hide the problem.
 String toDisplayRefs(String content, List<Ingredient> ingredients) {
-  final names = {for (final i in ingredients) i.id: i.name};
+  final labels = _labels(ingredients);
   return content.replaceAllMapped(_idRef, (match) {
-    final name = names[match[1]];
-    return name == null ? match[0]! : '[$name]';
+    final label = labels[match[1]];
+    return label == null ? match[0]! : '[$label]';
   });
 }
 
-/// `Whisk [bread flour]` -> `Whisk {0001}`. Names are matched exactly, after
+/// `Whisk [bread flour]` -> `Whisk {0001}`. Labels are matched exactly, after
 /// trimming — the insert chips write them verbatim, so anything that misses is
 /// a typo worth reporting rather than guessing at.
+///
+/// Exactly the inverse of [toDisplayRefs]: both key off the same labels, so a
+/// step opened in the editor and saved untouched comes back byte for byte.
 String toIdRefs(String content, List<Ingredient> ingredients) {
-  final ids = {for (final i in ingredients) i.name.trim(): i.id};
+  final ids = {for (final e in _labels(ingredients).entries) e.value: e.key};
   return content.replaceAllMapped(nameRefPattern, (match) {
     final id = ids[match[1]!.trim()];
     return id == null ? match[0]! : '{$id}';
   });
 }
 
-/// Bracketed names in [content] that aren't ingredients, in the order written.
+/// Bracketed labels in [content] that aren't ingredients, in the order written.
 ///
 /// Without this a mistyped `[buter]` would save as literal prose and quietly
 /// stop scaling, which is the failure the whole reference mechanism exists to
-/// prevent.
+/// prevent. A bare `[sugar]` typed by hand where two sugars exist lands here
+/// too — it names no single ingredient, so it is reported rather than guessed
+/// at. Tapping the insert chip always writes the resolvable form.
 List<String> unresolvedRefs(String content, List<Ingredient> ingredients) {
-  final names = {for (final i in ingredients) i.name.trim()};
+  final labels = _labels(ingredients).values.toSet();
   return [
     for (final match in nameRefPattern.allMatches(content))
-      if (!names.contains(match[1]!.trim())) match[1]!.trim(),
+      if (!labels.contains(match[1]!.trim())) match[1]!.trim(),
   ];
 }
 
@@ -65,18 +107,6 @@ List<Ingredient> unusedIngredients(Recipe recipe) {
     for (final ingredient in recipe.ingredients)
       if (!used.contains(ingredient.id)) ingredient,
   ];
-}
-
-/// Names shared by more than one ingredient, which the editor cannot allow:
-/// `[butter]` would have no way to say which one it meant.
-List<String> duplicateNames(List<Ingredient> ingredients) {
-  final seen = <String>{};
-  final duplicates = <String>{};
-  for (final ingredient in ingredients) {
-    final name = ingredient.name.trim();
-    if (!seen.add(name)) duplicates.add(name);
-  }
-  return duplicates.toList();
 }
 
 /// The next free 4-digit ingredient id. The schema pins the format, so this

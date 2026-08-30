@@ -1,8 +1,11 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 
+import '../recipe_image.dart';
 import '../recipe_models.dart';
 import '../recipe_parser.dart';
 import '../recipe_refs.dart';
@@ -50,6 +53,7 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
   final _servings = TextEditingController();
   final _tags = TextEditingController();
   final _notes = TextEditingController();
+  final _imageUrls = TextEditingController();
   final _json = TextEditingController();
 
   final _ingredients = <_IngredientDraft>[];
@@ -71,6 +75,7 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
     _servings.dispose();
     _tags.dispose();
     _notes.dispose();
+    _imageUrls.dispose();
     _json.dispose();
     _disposeDrafts();
     super.dispose();
@@ -93,16 +98,61 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
     _servings.text = '${recipe.baseServings}';
     _tags.text = recipe.tags.join(', ');
     _notes.text = recipe.notes ?? '';
+    // One per line rather than comma-separated like tags: commas are legal
+    // inside a url, and splitting on them would quietly cut one in half.
+    _imageUrls.text = recipe.imageUrls.join('\n');
 
     _disposeDrafts();
+    // Seeded with the label rather than the name: the step text below is
+    // rendered by [toDisplayRefs], which labels duplicates, so a draft that
+    // remembered the bare name would think every reference to it had gone.
+    final labels = labelsFor(recipe.ingredients);
     _ingredients
       ..clear()
-      ..addAll(recipe.ingredients.map(_IngredientDraft.from));
+      ..addAll([
+        for (final (n, ingredient) in recipe.ingredients.indexed)
+          _IngredientDraft.from(ingredient, labels[n]),
+      ]);
     _steps
       ..clear()
       ..addAll(
         recipe.steps.map((step) => _StepDraft.from(step, recipe.ingredients)),
       );
+  }
+
+  /// Copies a photo off the device into the store and points the recipe at it.
+  ///
+  /// Gallery only, deliberately: on iOS 14+ that is PHPicker, which needs no
+  /// Info.plist entry, and Android 13+ needs no permission. A camera source
+  /// would cost both.
+  ///
+  /// This writes the file before the edit is saved, so abandoning the edit
+  /// leaves it behind — see [RecipeStore.addImage]. It is still not a second
+  /// save path: all it does is fill in a text field, and the recipe goes
+  /// through [_save] and the parser like every other edit.
+  Future<void> _pickImage() async {
+    String message;
+    try {
+      final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
+      if (picked == null || !mounted) return;
+      final url = await widget.store.addImage(picked.path);
+      if (!mounted) return;
+      // Replaces the guesses rather than joining them: a local file cannot
+      // 404, so nothing behind it could ever be reached.
+      setState(() => _imageUrls.text = url);
+      return;
+    } on MissingPluginException {
+      // No Linux implementation, so the desktop harness lands here. The same
+      // class of degradation as share_plus falling back to mailto — not a bug,
+      // just not a phone.
+      message = 'Choosing a photo needs a phone or tablet.';
+    } catch (_) {
+      message = 'That photo could not be read. Try another.';
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   // ---------------------------------------------------------------- drafting
@@ -142,6 +192,10 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
           ),
       ],
       notes: _notes.text.trim().isEmpty ? null : _notes.text.trim(),
+      imageUrls: [
+        for (final url in _imageUrls.text.split('\n'))
+          if (url.trim().isNotEmpty) url.trim(),
+      ],
       tags: [
         for (final tag in _tags.text.split(','))
           if (tag.trim().isNotEmpty) tag.trim(),
@@ -153,7 +207,10 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
     );
   }
 
-  /// Moves `[old name]` to `[new name]` in every step after a rename.
+  /// The label each ingredient is currently referred to by in step text.
+  List<String> _labels() => labelsFor(_draftIngredients());
+
+  /// Moves `[old label]` to `[new label]` in every step after a rename.
   ///
   /// Step text refers to an ingredient by name, not by the id underneath, so a
   /// rename would otherwise strand every reference to it.
@@ -161,31 +218,30 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
   /// Runs on every keystroke, so the steps track the name as it is typed. Each
   /// call renames from whatever the steps currently say, so "b", "br", "bre"
   /// chains correctly rather than fighting itself.
+  ///
+  /// Labels, not names, because one keystroke can move two of them: typing
+  /// "warm water" down to "water" where a "water" already exists makes both
+  /// ingredients duplicates, so both pick up a `#id` and both their references
+  /// have to follow. Rewriting in one pass is safe — a new label either has a
+  /// different base name from every old one or carries an id suffix no bare
+  /// old label can match, so nothing this loop writes can be found by a later
+  /// iteration.
   void _applyRenames() {
-    for (final draft in _ingredients) {
-      final renamed = draft.name.text.trim();
-      if (renamed.isEmpty ||
-          draft.knownAs.isEmpty ||
-          renamed == draft.knownAs) {
-        continue;
+    final wanted = _labels();
+    for (final (index, draft) in _ingredients.indexed) {
+      final label = wanted[index];
+      if (label.isEmpty || label == draft.knownAs) continue;
+      // Nothing can be referencing a just-added ingredient, so there is no
+      // `[]` to search for — adopt the label and let the next rename move it.
+      if (draft.knownAs.isNotEmpty) {
+        for (final step in _steps) {
+          step.content.text = step.content.text.replaceAll(
+            '[${draft.knownAs}]',
+            '[$label]',
+          );
+        }
       }
-      // Typing towards a name passes through other names on the way — editing
-      // "warm water" down to "water" when a "water" already exists. Renaming
-      // then would rewrite that other ingredient's references too, so hold
-      // until the name is its own again. knownAs stays put, so the rename
-      // still lands once it does.
-      final taken = _ingredients.any(
-        (other) => !identical(other, draft) && other.knownAs == renamed,
-      );
-      if (taken) continue;
-
-      for (final step in _steps) {
-        step.content.text = step.content.text.replaceAll(
-          '[${draft.knownAs}]',
-          '[$renamed]',
-        );
-      }
-      draft.knownAs = renamed;
+      draft.knownAs = label;
     }
   }
 
@@ -230,12 +286,21 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
             'Rules:\n'
             '- Keep an ingredient id unchanged when the ingredient itself is '
             'unchanged.\n'
+            '- Give each ingredient a name distinct from the others. Where '
+            'the same thing appears in two components, say which: "caster '
+            'sugar (sponge)" and "caster sugar (buttercream)", not "caster '
+            'sugar" twice.\n'
             '- Step content references ingredients inline as {0001} — never '
             'repeat the amount in the text.\n'
             '- Set timer_seconds whenever a step involves waiting.\n'
             '- Set density_g_per_ml on every ingredient that could reasonably '
             'be measured either way, keeping any already there. Omit it only '
-            'for countable items and pinches.\n\n'
+            'for countable items and pinches.\n'
+            '- Leave image_urls alone if it already has entries: replacing a '
+            'picture that works with one you are unsure of is a loss. If it '
+            'is empty, fill it with up to three direct https links to photos '
+            'of the finished dish, best first, preferring stable public '
+            'sources such as Wikimedia Commons.\n\n'
             'The recipe to rewrite:\n${_json.text}',
       ),
     );
@@ -260,9 +325,10 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
   /// it — leaving the words behind rather than a hole in the sentence.
   Future<void> _removeIngredient(int index) async {
     final name = _ingredients[index].name.text.trim();
+    final label = _labels()[index];
     final usedIn = [
       for (final (number, draft) in _steps.indexed)
-        if (draft.content.text.contains('[$name]')) number + 1,
+        if (draft.content.text.contains('[$label]')) number + 1,
     ];
 
     if (usedIn.isNotEmpty) {
@@ -293,7 +359,7 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
       for (final draft in _steps) {
         // Unbracketed, not deleted: dropping the words would leave "Melt
         // with finely sliced garlic cloves".
-        draft.content.text = draft.content.text.replaceAll('[$name]', name);
+        draft.content.text = draft.content.text.replaceAll('[$label]', name);
       }
       _ingredients.removeAt(index).dispose();
     });
@@ -315,15 +381,28 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
     _applyRenames();
     final ingredients = _draftIngredients();
 
-    // Checks the schema cannot express, most specific first so the message
-    // names the real problem rather than a symptom of it.
+    // The one check the schema cannot express. Two ingredients may share a
+    // name — recipes split by component do it on purpose — so what has to hold
+    // is that every bracket names exactly one of them, which is what a label
+    // is for.
+    final shared = {
+      for (final i in ingredients)
+        if (ingredients.where((o) => o.name.trim() == i.name.trim()).length > 1)
+          i.name.trim(),
+    };
     final problems = <String>[
-      for (final name in duplicateNames(ingredients))
-        'Two ingredients are both called "$name" — rename one so a step can '
-            'say which it means.',
       for (final (number, draft) in _steps.indexed)
         for (final unknown in unresolvedRefs(draft.content.text, ingredients))
-          'Step ${number + 1} mentions [$unknown], which is not an ingredient.',
+          // A bare name that two ingredients answer to reads as unresolved,
+          // and saying so would be true but useless — the fix is to pick one,
+          // not to invent an ingredient.
+          if (shared.contains(unknown))
+            'Step ${number + 1} mentions [$unknown], but more than one '
+                'ingredient is called that. Tap the one you mean under the '
+                'step to replace it.'
+          else
+            'Step ${number + 1} mentions [$unknown], which is not an '
+                'ingredient.',
     ];
     if (problems.isNotEmpty) {
       setState(() => _errors = problems);
@@ -469,6 +548,13 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
       ),
     ),
     const SizedBox(height: 12),
+    // Directly under the title, because it is the recipe's face.
+    _ImageField(
+      controller: _imageUrls,
+      store: widget.store,
+      onPick: _pickImage,
+    ),
+    const SizedBox(height: 12),
     Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -530,7 +616,7 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
         draft: draft,
         number: index + 1,
         accent: accent,
-        names: [for (final i in _ingredients) i.name.text.trim()],
+        names: _labels(),
         onRemove: () => _removeStep(index),
         onToggle: () => setState(() => draft.expanded = !draft.expanded),
       ),
@@ -547,6 +633,167 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
       ),
     ),
   ];
+}
+
+/// The recipe's photo: where it came from, and what it looks like.
+///
+/// Its own widget listening to the controller, rather than driving the editor's
+/// `setState`, for the same reason [_UnitField] is one: a keystroke here should
+/// repaint a 72px thumbnail, not a form holding twenty text fields.
+class _ImageField extends StatefulWidget {
+  final TextEditingController controller;
+  final RecipeStore store;
+  final VoidCallback onPick;
+
+  const _ImageField({
+    required this.controller,
+    required this.store,
+    required this.onPick,
+  });
+
+  @override
+  State<_ImageField> createState() => _ImageFieldState();
+}
+
+class _ImageFieldState extends State<_ImageField> {
+  ImageChain? _chain;
+  List<String>? _chainUrls;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_refresh);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _restart();
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_refresh);
+    _chain?.dispose();
+    super.dispose();
+  }
+
+  void _refresh() {
+    setState(() {});
+    _restart();
+  }
+
+  List<String> get _urls => [
+    for (final url in widget.controller.text.split('\n'))
+      if (url.trim().isNotEmpty) url.trim(),
+  ];
+
+  /// The same chain the detail screen runs, so the preview and the hero can
+  /// never disagree about which url wins.
+  // ponytail: restarts as you type, so hand-typing a url resolves each partial
+  // form of it. imageFor rejects anything not yet https, which caps the waste —
+  // debounce if it ever matters.
+  void _restart() {
+    final urls = _urls;
+    if (listEquals(_chainUrls, urls)) return;
+    _chain?.dispose();
+    _chainUrls = urls;
+    _chain = ImageChain(urls, widget.store, () {
+      if (mounted) setState(() {});
+    });
+    _chain!.resolve(createLocalImageConfiguration(context));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final urls = _urls;
+    final winner = _chain?.winner;
+    final image = imageFor(winner, widget.store);
+    return Row(
+      children: [
+        // Tap the picture to change the picture — no separate button, and the
+        // badge is what says so, since there is no hover on a phone. The same
+        // move the detail screen's ingredient rows make.
+        Tooltip(
+          message: 'Choose photo',
+          child: InkWell(
+            onTap: widget.onPick,
+            borderRadius: BorderRadius.circular(pillRadius),
+            child: Container(
+              width: 72,
+              height: 72,
+              alignment: Alignment.center,
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(pillRadius),
+                color: glassFill(context),
+                border: Border.all(color: glassRim(context)),
+              ),
+              // The preview is the reason this lives in the form at all: urls
+              // that all lead nowhere show themselves here, before saving,
+              // instead of turning up later as a recipe with no photo.
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  if (image case final image?)
+                    Image(
+                      image: image,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, _, _) => const SizedBox.shrink(),
+                    )
+                  else
+                    Icon(
+                      urls.isEmpty
+                          ? Icons.add_a_photo_outlined
+                          : Icons.broken_image_outlined,
+                      color: urls.isEmpty
+                          ? theme.colorScheme.onSurfaceVariant
+                          : theme.colorScheme.error,
+                    ),
+                  if (image != null)
+                    Positioned(
+                      right: 0,
+                      bottom: 0,
+                      child: ColoredBox(
+                        color: theme.colorScheme.surface.withValues(
+                          alpha: 0.75,
+                        ),
+                        child: const Padding(
+                          padding: EdgeInsets.all(3),
+                          child: Icon(Icons.edit_outlined, size: 13),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: TextField(
+            controller: widget.controller,
+            keyboardType: TextInputType.multiline,
+            minLines: 1,
+            maxLines: 3,
+            decoration: InputDecoration(
+              labelText: 'Images',
+              // Doubles as the source line: the host the detail screen will
+              // credit under the photo, so what wins here is what wins there.
+              helperText:
+                  creditFor(winner) ??
+                  (urls.isEmpty
+                      ? 'Optional — one link per line, or tap'
+                      : 'None of these loaded'),
+              isDense: true,
+              border: const OutlineInputBorder(),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 /// "step 2", "steps 1 and 3", "steps 1, 2 and 4".
@@ -568,8 +815,9 @@ class _IngredientDraft {
   final TextEditingController density;
   Unit? unit;
 
-  /// The name the step text currently refers to this ingredient by. Empty for
-  /// one just added, which no step can be referencing yet.
+  /// The label the step text currently refers to this ingredient by — the
+  /// name, or `name #id` where it shares that name. Empty for one just added,
+  /// which no step can be referencing yet.
   String knownAs;
 
   _IngredientDraft({
@@ -577,21 +825,23 @@ class _IngredientDraft {
     required String name,
     required String amount,
     String density = '',
+    this.knownAs = '',
     this.unit,
   }) : name = TextEditingController(text: name),
        amount = TextEditingController(text: amount),
-       density = TextEditingController(text: density),
-       knownAs = name.trim();
+       density = TextEditingController(text: density);
 
-  factory _IngredientDraft.from(Ingredient ingredient) => _IngredientDraft(
-    id: ingredient.id,
-    name: ingredient.name,
-    amount: formatAmount(ingredient.amount),
-    density: ingredient.densityGPerMl == null
-        ? ''
-        : formatAmount(ingredient.densityGPerMl!),
-    unit: ingredient.unit,
-  );
+  factory _IngredientDraft.from(Ingredient ingredient, String knownAs) =>
+      _IngredientDraft(
+        id: ingredient.id,
+        knownAs: knownAs,
+        name: ingredient.name,
+        amount: formatAmount(ingredient.amount),
+        density: ingredient.densityGPerMl == null
+            ? ''
+            : formatAmount(ingredient.densityGPerMl!),
+        unit: ingredient.unit,
+      );
 
   factory _IngredientDraft.blank(String id) =>
       _IngredientDraft(id: id, name: '', amount: '');

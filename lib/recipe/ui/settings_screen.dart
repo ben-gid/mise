@@ -49,7 +49,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return GlassScaffold(
       appBar: glassAppBar(context, title: const Text('Settings')),
       body: ListView(
-        padding: EdgeInsets.only(top: glassAppBarInset(context) + 8, bottom: 24),
+        padding: EdgeInsets.only(
+          top: glassAppBarInset(context) + 8,
+          bottom: 24,
+        ),
         children: [
           _heading('Theme'),
           _panel([
@@ -70,9 +73,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _heading('Measure by'),
           _panel([
             for (final (by, label, example) in const [
-              (MeasureBy.asWritten, 'As written', 'However each recipe saved it'),
+              (
+                MeasureBy.asWritten,
+                'As written',
+                'However each recipe saved it',
+              ),
               (MeasureBy.weight, 'Weight', 'On a scale wherever it can be'),
-              (MeasureBy.volume, 'Volume', 'In cups and spoons wherever it can be'),
+              (
+                MeasureBy.volume,
+                'Volume',
+                'In cups and spoons wherever it can be',
+              ),
             ])
               ListTile(
                 title: Text(label),
