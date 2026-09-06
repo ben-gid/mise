@@ -91,12 +91,32 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
     if (listEquals(_photoUrls, _recipe.imageUrls)) return;
     _photos?.dispose();
     _photoUrls = _recipe.imageUrls;
-    _close.value = 0;
-    _photos = ImageChain(_recipe.imageUrls, widget.store, () {
-      if (!mounted) return;
-      setState(() {});
-      if (_photos?.exhausted ?? false) _close.forward();
-    });
+    // Open for a recipe that carries urls — the first is optimistically the
+    // winner, so the photo is there on the first frame. Shut for one that
+    // carries none: the Wikipedia fallback is a round trip away, and a hero
+    // that opened empty and shut again would flicker on every dish the lookup
+    // misses. It eases *open* instead, on the callback below.
+    _close.value = _recipe.imageUrls.isEmpty ? 1 : 0;
+    _photos = ImageChain(
+      _recipe.imageUrls,
+      widget.store,
+      () {
+        if (!mounted) return;
+        setState(() {});
+        if (_photos?.exhausted ?? false) {
+          _close.forward();
+        } else if (_photos?.winner != null) {
+          // A no-op for a recipe that started open, which is every recipe with
+          // urls of its own.
+          _close.reverse();
+        }
+      },
+      // Always, not only as a rescue for urls that failed: the import prompt
+      // now tells the model to leave image_urls empty rather than invent one,
+      // so a recipe with no urls at all is the common case and the one most
+      // in need of a photo.
+      title: _recipe.title,
+    );
     _photos!.resolve(createLocalImageConfiguration(context));
   }
 
@@ -134,7 +154,11 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
     _startPhotos();
   }
 
-  Future<void> _edit() async {
+  /// [pickImage] opens straight into the photo picker, which is all the
+  /// "Add photo" action is: the editor has held the picker all along, and
+  /// routing through it keeps the save going through the parser like every
+  /// other edit rather than growing a second save path here.
+  Future<void> _edit({bool pickImage = false}) async {
     final saved = await Navigator.push<SavedRecipe>(
       context,
       MaterialPageRoute(
@@ -143,6 +167,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
           recipe: _recipe,
           store: widget.store,
           parser: widget.parser,
+          pickImageOnOpen: pickImage,
         ),
       ),
     );
@@ -404,6 +429,16 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
   /// not one wearing generated art in a picture's place.
   Widget _hero(BuildContext context, Color accent) {
     final actions = [
+      // Only where there is nothing to look at — a stand-in from Wikipedia
+      // counts, and a recipe wearing one is not the one crying out for a
+      // photo. The one image that cannot 404 is the one already on the phone,
+      // and until now nothing on this screen said the editor could take it.
+      if (_photos?.winner == null)
+        IconButton(
+          onPressed: () => _edit(pickImage: true),
+          tooltip: 'Add photo',
+          icon: const Icon(Icons.add_a_photo_outlined),
+        ),
       IconButton(
         onPressed: _openHistory,
         tooltip: 'Version history',
@@ -421,9 +456,11 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
       ),
     ];
 
-    if (_recipe.imageUrls.isEmpty) {
-      // Pixel-identical to what every other screen shows. A recipe with no
-      // photo pays nothing for a feature it isn't using.
+    if (_recipe.imageUrls.isEmpty && _photos?.winner == null) {
+      // Nothing on screen and nothing claimed: either the lookup is still out
+      // or it missed. Pixel-identical to what every other screen shows, so a
+      // recipe with no photo pays nothing for a feature it isn't using — and
+      // a fallback that arrives late finds the hero shut and opens it.
       return SliverAppBar(
         pinned: true,
         actions: actions,

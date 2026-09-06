@@ -1,4 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Recipe photos are urls: the image chain in recipe_image.dart and the
+         Wikipedia fallback both need this. The debug and profile manifests
+         declare it for the tooling, so without it here a recipe loses every
+         photo in release and nowhere else. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="Mise"
         android:name="${applicationName}"

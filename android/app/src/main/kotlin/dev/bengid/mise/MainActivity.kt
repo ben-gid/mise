@@ -1,4 +1,4 @@
-package com.example.mise
+package dev.bengid.mise
 
 import io.flutter.embedding.android.FlutterActivity
 

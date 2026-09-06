@@ -36,7 +36,7 @@ class RecipeParser {
   Recipe parse(String rawJson) {
     final Object? decoded;
     try {
-      decoded = jsonDecode(rawJson);
+      decoded = jsonDecode(_unfence(rawJson));
     } on FormatException catch (e) {
       throw RecipeValidationException(['Malformed JSON: ${e.message}']);
     }
@@ -55,6 +55,13 @@ class RecipeParser {
     return Recipe.fromJson(decoded as Map<String, dynamic>);
   }
 }
+
+/// The prompt asks the LLM for a ```json code block, and text selected by
+/// hand brings the fence along with it. Strip it rather than answering a
+/// paste that is otherwise perfect with "Malformed JSON".
+final _fence = RegExp(r'^\s*```[a-zA-Z]*\s*\n(.*?)\n?\s*```\s*$', dotAll: true);
+
+String _unfence(String raw) => _fence.firstMatch(raw)?.group(1) ?? raw;
 
 /// json_schema appends the offending instance to some messages, which for a
 /// whole recipe is unreadable. Keep the path and the reason, drop the dump.

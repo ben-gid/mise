@@ -94,6 +94,11 @@ void main() {
     expect(errors.single, startsWith('Malformed JSON'));
   });
 
+  test('a pasted ```json code block parses', () {
+    expect(parser.parse('```json\n$validJson\n```').title, isNotEmpty);
+    expect(parser.parse('```\n$validJson\n```').title, isNotEmpty);
+  });
+
   test('reports every failure at once', () {
     final errors = errorsOf(
       mutated((r) {

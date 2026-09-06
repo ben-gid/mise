@@ -105,6 +105,35 @@ void main() {
       expect(chain.winner, 'https://c.example/3.jpg');
     });
 
+    testWidgets('a title buys one last try, and a miss still settles', (
+      tester,
+    ) async {
+      final chain = ImageChain(
+        const ['https://a.example/1.jpg'],
+        store,
+        () {},
+        title: 'A dish with no article',
+      );
+      addTearDown(chain.dispose);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      // The lookup is a real dart:io future, which never completes inside the
+      // fake-async zone (CLAUDE.md). Still no network: the test binding answers
+      // every request with a 400, which is exactly the miss being tested.
+      await tester.runAsync(() async {
+        chain.resolve(ImageConfiguration.empty);
+        for (var i = 0; i < 200 && !chain.exhausted; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+      });
+
+      // The point of the guard in _finish: a fallback that also fails comes
+      // straight back through it, and must settle rather than look itself up
+      // again forever.
+      expect(chain.exhausted, isTrue);
+      expect(chain.winner, isNull);
+    });
+
     testWidgets('a chain with nothing in it is exhausted immediately', (
       tester,
     ) async {

@@ -32,12 +32,18 @@ class RecipeEditScreen extends StatefulWidget {
   final RecipeStore store;
   final RecipeParser parser;
 
+  /// Opens straight into the photo picker. The detail screen's "Add photo"
+  /// routes here rather than saving on its own — a photo is an edit like any
+  /// other, and a second save path would be a second set of rules.
+  final bool pickImageOnOpen;
+
   const RecipeEditScreen({
     super.key,
     required this.id,
     required this.recipe,
     required this.store,
     required this.parser,
+    this.pickImageOnOpen = false,
   });
 
   @override
@@ -66,6 +72,11 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
   void initState() {
     super.initState();
     _load(widget.recipe);
+    // After the first frame: _pickImage answers the desktop harness with a
+    // SnackBar, and ScaffoldMessenger needs the Scaffold to exist first.
+    if (widget.pickImageOnOpen) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _pickImage());
+    }
   }
 
   @override
@@ -280,8 +291,12 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
     await Clipboard.setData(
       ClipboardData(
         text:
-            'Rewrite this recipe as a single JSON object, no markdown fence, '
-            'no commentary. It must validate against this JSON Schema:\n\n'
+            'Rewrite this recipe as JSON for the mise recipe app.\n\n'
+            'Put the whole JSON in one ```json code block, and put nothing '
+            'else in that block — no comments, no notes. Anything you want to '
+            'tell me goes outside the block. I will copy that block and paste '
+            'it back into the recipe editor, which checks it against this '
+            'JSON Schema before saving:\n\n'
             '${widget.parser.schemaJson}\n\n'
             'Rules:\n'
             '- Keep an ingredient id unchanged when the ingredient itself is '

@@ -33,7 +33,7 @@
       "type": "array",
       "maxItems": 3,
       "items": { "type": "string", "pattern": "^(https|mise)://" },
-      "description": "Up to three photos of the finished dish, best first. The app shows the first that loads, so the later entries are fallbacks for a url that turns out to be dead. https only — phones block cleartext http. mise:// is written by the app for a photo picked from the device; never emit it."
+      "description": "Photos of the finished dish, best first \u2014 but only urls you are actually confident exist. Leave this empty rather than guessing: a reconstructed CDN path 404s, and several guesses fail together rather than covering for each other. The app falls back to a photo of the dish from Wikipedia and to the cook's own camera, so no url is a better answer than an invented one. https only \u2014 phones block cleartext http. mise:// is written by the app for a photo picked from the device; never emit it."
     },
     "tags": {
       "type": "array",
