@@ -123,12 +123,23 @@ weight below ~½ oz stays in grams, where a tenth of an ounce is 13% of 5 g.
 **A recipe's photos are urls, and that is what keeps them cheap.** `image_urls`
 holds up to three, best first — `https` links the LLM found, or a single
 `mise://<filename>` for a photo picked off the device and copied in beside the
-recipes by `RecipeStore.addImage`. Three because the import prompt asks for a
-link *even where the model is unsure*: guessed blog CDN paths are hashed and
-dated and mostly 404, so the later entries are fallbacks. Because it is an
+recipes by `RecipeStore.addImage`. It once asked for three *even where the model was
+unsure*, on the theory that later entries cover for a dead first one. They do not:
+guessed blog CDN paths are hashed and dated, and three guesses from one model are one
+guess sampled three times — they 404 together. The prompt now asks for a url only where
+the model is confident it exists, and for none otherwise. The cap stays at three because
+tightening it to one would make every recipe already on disk with three urls fail its
+next save, the same way a required field would. Because it is an
 ordinary list of strings, `saveVersion` carries it forward, the version diff
 sees it, and the editor round-trips it — none of which a binary `<id>.image`
-sidecar would have got for free. The urls are relative on purpose where local:
+sidecar would have got for free. When every url fails — or a recipe carries none, which
+the import prompt now asks for outright rather than have the model invent one —
+`wikipediaImage` looks the title up on the MediaWiki `pageimages` API and the chain
+takes that as its last link. It is a photo of the *dish*, not of this recipe, and
+`creditFor` says "Wikipedia" rather than `upload.wikimedia.org` so the reader can tell.
+A miss (no article, offline, a 403) reads as null and the recipe is one with no photo,
+which is when the detail screen offers "Add photo" — routed through the editor's
+existing picker, never a second save path. The urls are relative on purpose where local:
 iOS hands the app container a new UUID on every update, so an absolute path
 saved today is a dead path after the next release. `https` only, never `http` —
 phones block cleartext, so a url that could never load is rejected at the
@@ -137,19 +148,25 @@ schema.
 [lib/recipe/recipe_image.dart](lib/recipe/recipe_image.dart) is the chokepoint,
 the way `amountLabel` is for amounts: `imageFor` turns a url into something
 paintable, `creditFor` turns it into the host shown under the photo, and
-`ImageChain` walks the list until one loads. The chain is **headless** — it
+`ImageChain` walks the list until one loads. `imageFor` hands back a `CachedNetworkImageProvider`, not a plain `NetworkImage`: `dart:io`'s HttpClient has no HTTP cache at all — it ignores `Cache-Control` and `ETag` — and Flutter's `ImageCache` dies with the process, so every cold start re-downloaded every photo, and a kitchen with no signal showed none. The `_wikipedia` memo is still per-run; only the images survive a restart. The chain is **headless** — it
 resolves through the image cache without painting — because the detail screen
 *sizes its app bar* on the outcome, and a widget that rendered the chain and
 reported upwards would loop: child says exhausted, parent shrinks, child
-rebuilds, reports again. The detail screen and the editor preview each own one,
-which is what stops the preview and the hero disagreeing about which url wins.
+rebuilds, reports again. The detail screen, each list row and the editor preview
+own one apiece, which is what stops the preview and the hero disagreeing about
+which url wins.
 
 **A recipe whose photos all fail is a recipe with no photo.** The hero eases
 shut and the screen becomes the plain one, rather than sitting open on generated
 art in a picture's place. That art is still the *list thumbnail* fallback, where
-a 64px tile has nothing to collapse into. The list deliberately does not run the
-chain — three network attempts per row in a scrolling list is a real cost, and
-the title initial is the right answer at that size. Nothing deletes a photo: a
+a 64px tile has nothing to collapse into — it shows through while the chain is
+looking and stays put when it comes back with nothing. The list runs the chain
+too now, in `_Cover`, so a row shows the same photo the hero settles on. It used
+to skip it, on the grounds that several network attempts per row in a scrolling
+list is a real cost; that cost is smaller since the prompt stopped asking for
+padded guesses, so most rows spend no attempt on urls of their own, and
+`wikipediaImage` is memoised per title — shared across rows and with the detail
+screen. Nothing deletes a photo: a
 deleted recipe leaves its file behind, because the list screen's Undo re-saves
 the recipe and would otherwise find the picture gone.
 
@@ -182,6 +199,20 @@ constructed once in `main()` and passed down by constructor.
 - `setState(() => _field = someFuture)` silently asserts at runtime: the arrow body returns
   the assigned Future. Use a block body.
 - The model class is `RecipeStep`, not `Step`, because `material.Step` exists.
+- Photos resolve through `CachedNetworkImageProvider`, so anything that paints
+  one drags in `flutter_cache_manager`, which asks `path_provider` for a cache
+  dir. There is no plugin behind that channel under `flutter test`, and the
+  `MissingPluginException` never reaches the `ImageStreamListener` — the stream
+  just never completes and `ImageChain` hangs. `test/flutter_test_config.dart`
+  mocks the channel to a temp dir for every test file; that is why no individual
+  test opts in, and why deleting that file breaks tests that never mention
+  images.
+- A test that resolves an https url must let the request finish before it ends,
+  inside `runAsync`, even when its assertion has already passed —
+  `flutter_cache_manager` takes a lock per request and one abandoned mid-flight
+  is never released, so the *next* test to resolve anything blocks forever. See
+  `_drain` in `recipe_image_test.dart`. The symptom is a test that passes alone
+  and fails in its own file.
 - `image_picker` has no Linux implementation, so "Choose photo" throws
   `MissingPluginException` on the desktop harness and answers with a SnackBar.
   Expect that, the same way the share button degrades to `mailto:` there.

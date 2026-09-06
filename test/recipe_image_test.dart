@@ -1,9 +1,24 @@
 import 'dart:io';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mise/recipe/recipe_image.dart';
 import 'package:mise/recipe/recipe_store.dart';
+
+/// Waits for a chain to run out, inside a `runAsync` — its requests are real
+/// `dart:io` futures that never complete in the fake-async zone (CLAUDE.md).
+///
+/// Every test that resolves an https url has to do this before it ends, even
+/// one whose assertion has already passed: `flutter_cache_manager` takes a lock
+/// per request, and one abandoned mid-flight is never released, so the next
+/// test to resolve anything waits on it forever. Bounded rather than open, so a
+/// chain that stops settling fails here instead of at the file timeout.
+Future<void> _drain(ImageChain chain) async {
+  for (var i = 0; i < 1000 && !chain.exhausted; i++) {
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
+}
 
 /// Plain `test()`, not `testWidgets`: nothing here builds a widget or touches
 /// the network, so none of the fake-async traps apply.
@@ -11,10 +26,14 @@ void main() {
   final store = RecipeStore(Directory('/tmp/mise-image-test'));
 
   group('imageFor', () {
-    test('an https url becomes a network image', () {
+    test('an https url becomes a disk-cached network image', () {
       final image = imageFor('https://example.com/loaf.jpg', store);
-      expect(image, isA<NetworkImage>());
-      expect((image! as NetworkImage).url, 'https://example.com/loaf.jpg');
+      // Cached, not plain: a plain NetworkImage re-downloads on every launch.
+      expect(image, isA<CachedNetworkImageProvider>());
+      expect(
+        (image! as CachedNetworkImageProvider).url,
+        'https://example.com/loaf.jpg',
+      );
     });
 
     test('a mise url resolves against the store directory', () {
@@ -100,9 +119,12 @@ void main() {
       addTearDown(chain.dispose);
 
       await tester.pumpWidget(const SizedBox.shrink());
-      chain.resolve(ImageConfiguration.empty);
-
-      expect(chain.winner, 'https://c.example/3.jpg');
+      await tester.runAsync(() async {
+        chain.resolve(ImageConfiguration.empty);
+        // Before any round trip: http and gibberish were rejected outright.
+        expect(chain.winner, 'https://c.example/3.jpg');
+        await _drain(chain);
+      });
     });
 
     testWidgets('a title buys one last try, and a miss still settles', (
@@ -122,9 +144,7 @@ void main() {
       // every request with a 400, which is exactly the miss being tested.
       await tester.runAsync(() async {
         chain.resolve(ImageConfiguration.empty);
-        for (var i = 0; i < 200 && !chain.exhausted; i++) {
-          await Future<void>.delayed(const Duration(milliseconds: 10));
-        }
+        await _drain(chain);
       });
 
       // The point of the guard in _finish: a fallback that also fails comes

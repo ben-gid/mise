@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 
 import '../recipe_image.dart';
@@ -210,11 +211,9 @@ class _RecipeRow extends StatelessWidget {
                   _Cover(
                     letter: recipe.title[0].toUpperCase(),
                     accent: accent,
-                    // First url only, no fallback chain: three network
-                    // attempts per row in a scrolling list is a real cost,
-                    // and the initial below is already the right answer at
-                    // 64px.
-                    image: imageFor(recipe.imageUrls.firstOrNull, store),
+                    urls: recipe.imageUrls,
+                    title: recipe.title,
+                    store: store,
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -262,20 +261,86 @@ class _RecipeRow extends StatelessWidget {
   }
 }
 
-/// The recipe's photo, or — for a recipe that carries none, which is most of
-/// them — generated art: its tag hue, lit from the top left, under the initial
-/// of its title.
-class _Cover extends StatelessWidget {
+/// The recipe's photo, or — while one is being found, and for a recipe that
+/// never gets one — generated art: its tag hue, lit from the top left, under
+/// the initial of its title.
+///
+/// Runs the full [ImageChain], Wikipedia fallback included, which the list used
+/// to skip on the grounds that several network attempts per row is a real cost.
+/// It is a smaller cost than it was: the import prompt no longer asks the model
+/// to pad `image_urls` with guesses, so most rows spend no attempt on urls of
+/// their own, and [wikipediaImage] is memoised per title — a row shares its
+/// lookup with the detail screen and with every other recipe for the same dish.
+// ponytail: still one API call per distinct title on first scroll. Resolve only
+// what is already in the memo if a large library ever makes that felt.
+class _Cover extends StatefulWidget {
   final String letter;
   final Color accent;
-  final ImageProvider? image;
+  final List<String> urls;
 
-  const _Cover({required this.letter, required this.accent, this.image});
+  /// The dish, for the fallback — see [ImageChain.title].
+  final String title;
+  final RecipeStore store;
+
+  const _Cover({
+    required this.letter,
+    required this.accent,
+    required this.urls,
+    required this.title,
+    required this.store,
+  });
+
+  @override
+  State<_Cover> createState() => _CoverState();
+}
+
+class _CoverState extends State<_Cover> {
+  ImageChain? _chain;
+
+  /// Guarded because `didChangeDependencies` runs again on a theme or metrics
+  /// change, and restarting the chain there would re-spend every attempt.
+  bool _started = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    _start();
+  }
+
+  /// Rows are keyed by recipe id, so this mostly guards a reload that swaps a
+  /// recipe's content under the id it already had.
+  @override
+  void didUpdateWidget(_Cover oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (listEquals(oldWidget.urls, widget.urls) &&
+        oldWidget.title == widget.title) {
+      return;
+    }
+    _start();
+  }
+
+  void _start() {
+    _chain?.dispose();
+    _chain = ImageChain(widget.urls, widget.store, () {
+      if (mounted) setState(() {});
+    }, title: widget.title);
+    _chain!.resolve(createLocalImageConfiguration(context));
+  }
+
+  @override
+  void dispose() {
+    _chain?.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final accent = widget.accent;
+    final image = imageFor(_chain?.winner, widget.store);
     final initial = Text(
-      letter,
+      widget.letter,
       style: Theme.of(
         context,
       ).textTheme.titleMedium?.copyWith(fontSize: 22, color: onAccent(accent)),
@@ -290,13 +355,13 @@ class _Cover extends StatelessWidget {
         gradient: coverGradient(accent),
       ),
       // The generated art stays underneath rather than being an alternative to
-      // the photo, so it is what shows through while the image loads and what
-      // is left if the url turns out to be dead. No loadingBuilder — a spinner
-      // per row would be dozens of indefinite animations (see CLAUDE.md).
+      // the photo, so it is what shows through while the chain is still looking
+      // and what is left when it comes back with nothing. No loadingBuilder — a
+      // spinner per row would be dozens of indefinite animations (CLAUDE.md).
       child: image == null
           ? initial
           : Image(
-              image: image!,
+              image: image,
               width: _coverSize,
               height: _coverSize,
               fit: BoxFit.cover,

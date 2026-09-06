@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/widgets.dart';
 
 import 'recipe_store.dart';
@@ -37,7 +38,11 @@ ImageProvider? imageFor(String? url, RecipeStore store) {
   // rather than as a picture that only fails on the device.
   final uri = Uri.tryParse(url);
   if (uri == null || !uri.isScheme('https')) return null;
-  return NetworkImage(url);
+  // Cached rather than plain NetworkImage: `dart:io`'s HttpClient has no HTTP
+  // cache at all — it ignores Cache-Control and ETag — and Flutter's ImageCache
+  // dies with the process, so every cold start re-downloaded every photo. A
+  // recipe is read at a counter on whatever signal a kitchen has.
+  return CachedNetworkImageProvider(url);
 }
 
 /// Where the picture came from, for the credit line under it — a host, not the
