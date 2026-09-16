@@ -63,7 +63,12 @@ void main() {
     expect(text, contains('- 8 garlic cloves')); // countable, no unit
     expect(text, contains('2. Bulk proof (2 h)'));
     expect(text, contains('Whisk 1000 g bread flour'));
-    expect(text, contains('Notes\nThe dough can rest overnight'));
+    // The headnote reads straight under the title, the way a cookbook sets
+    // one — not labelled 'Notes' at the foot of the page.
+    expect(
+      text,
+      startsWith('Garlic Butter Focaccia\n\nA slow-proofed focaccia'),
+    );
     expect(text, contains('Source: claude-generated'));
     expect(text, isNot(contains('{')));
   });

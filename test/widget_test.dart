@@ -318,6 +318,7 @@ void main() {
   testWidgets('a long name wraps instead of truncating, and the tags lead', (
     tester,
   ) async {
+    tallSurface(tester);
     const long = 'Slow-Proofed Rosemary and Sea Salt Focaccia';
     final recipe = Recipe.fromJson({
       ...(jsonDecode(validJson) as Map<String, dynamic>),
@@ -351,9 +352,58 @@ void main() {
     );
   });
 
+  testWidgets('the headnote opens the recipe, above the ingredients', (
+    tester,
+  ) async {
+    tallSurface(tester);
+    await pumpDetail(tester);
+
+    expect(
+      tester.getTopLeft(find.textContaining('A slow-proofed focaccia')).dy,
+      lessThan(tester.getTopLeft(find.text('Ingredients')).dy),
+    );
+  });
+
+  testWidgets('a long headnote is cut short until More is tapped', (
+    tester,
+  ) async {
+    // Long enough to pass four lines at the default 800px surface, so the
+    // servings stepper would otherwise start well down the page.
+    final long = List.filled(
+      12,
+      'Proof it somewhere warm and leave yourself plenty of time.',
+    ).join(' ');
+    final json = jsonEncode({
+      ...(jsonDecode(validJson) as Map<String, dynamic>),
+      'notes': long,
+    });
+    await pumpDetail(tester, json: json);
+
+    final collapsed = tester.getSize(find.text(long)).height;
+    expect(find.widgetWithText(TextButton, 'More'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(TextButton, 'More'));
+    await tester.pumpAndSettle();
+
+    expect(tester.getSize(find.text(long)).height, greaterThan(collapsed));
+    expect(find.widgetWithText(TextButton, 'Less'), findsOneWidget);
+  });
+
+  testWidgets('a short headnote gets no More button', (tester) async {
+    final json = jsonEncode({
+      ...(jsonDecode(validJson) as Map<String, dynamic>),
+      'notes': 'Best the day it is baked.',
+    });
+    await pumpDetail(tester, json: json);
+
+    expect(find.text('Best the day it is baked.'), findsOneWidget);
+    expect(find.widgetWithText(TextButton, 'More'), findsNothing);
+  });
+
   testWidgets('detail screen rescales amounts and step text live', (
     tester,
   ) async {
+    tallSurface(tester);
     await pumpDetail(tester);
 
     expect(find.text('500 g'), findsOneWidget);
@@ -502,7 +552,13 @@ void main() {
   });
 
   /// Opens the editor from the detail screen and waits for its fields.
+  ///
+  /// On a tall surface, because the headnote field now leads the form and a
+  /// real headnote is several lines: on a default 600px surface the first
+  /// ingredient row is below the fold and a ListView has not built it. These
+  /// tests are about what the fields do, not about scrolling to reach them.
   Future<void> openEditor(WidgetTester tester) async {
+    tallSurface(tester);
     await tester.tap(find.byIcon(Icons.edit_outlined));
     await tester.pumpAndSettle();
     expect(find.text('Edit recipe'), findsOneWidget);
@@ -567,15 +623,16 @@ void main() {
   testWidgets('a rename reaches the steps as it is typed, before any save', (
     tester,
   ) async {
-    // Tall enough that an ingredient field and a step are on screen together;
-    // at the default size the steps are below the fold and never built.
-    tester.view.physicalSize = const Size(1200, 2600);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-
     await pumpDetail(tester);
     await openEditor(tester);
+
+    // Taller than [tallSurface] leaves it, so that an ingredient field and a
+    // step are on screen together; otherwise the steps are below the fold and
+    // never built. Set after the open, which has a surface of its own.
+    tester.view.physicalSize = const Size(1200, 2600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpAndSettle();
 
     await tester.tap(find.text('Mix the dough'));
     await tester.pumpAndSettle();

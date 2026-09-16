@@ -50,6 +50,57 @@ void main() {
     expect(() => parser.parse(onDisk), returnsNormally);
   });
 
+  // A recipe written before the headnote replaced the separate `description`
+  // field. It reaches [Recipe.fromJson] without ever passing the validator —
+  // which is what lets the schema drop `description` outright — so the fold is
+  // the only thing carrying that text forward.
+  group('a recipe saved with the old description field', () {
+    String legacy({String? notes}) {
+      final map = jsonDecode(validJson) as Map<String, dynamic>;
+      map['description'] = 'Slow-proofed focaccia with a garlic butter crust.';
+      if (notes == null) {
+        map.remove('notes');
+      } else {
+        map['notes'] = notes;
+      }
+      return jsonEncode(map);
+    }
+
+    test('reads as the headnote', () async {
+      File('${dir.path}/1-legacy.json').writeAsStringSync(legacy());
+      final loaded = await store.loadAll();
+
+      expect(
+        loaded.single.$2.notes,
+        'Slow-proofed focaccia with a garlic butter crust.',
+      );
+    });
+
+    test('keeps its own notes too, description first', () async {
+      File(
+        '${dir.path}/1-legacy.json',
+      ).writeAsStringSync(legacy(notes: 'Rest it overnight.'));
+      final loaded = await store.loadAll();
+
+      expect(
+        loaded.single.$2.notes,
+        'Slow-proofed focaccia with a garlic butter crust.\n\n'
+        'Rest it overnight.',
+      );
+    });
+
+    test('drops the old field on its next save, still schema-valid', () async {
+      File('${dir.path}/1-legacy.json').writeAsStringSync(legacy());
+      final loaded = await store.loadAll();
+
+      final id = await store.save(loaded.single.$2);
+      final onDisk = File('${dir.path}/$id.json').readAsStringSync();
+
+      expect(jsonDecode(onDisk), isNot(contains('description')));
+      expect(() => parser.parse(onDisk), returnsNormally);
+    });
+  });
+
   test('loads newest first', () async {
     await store.save(parser.parse(variant('Older', '2026-01-01T00:00:00Z')));
     await store.save(parser.parse(variant('Newer', '2026-08-01T00:00:00Z')));

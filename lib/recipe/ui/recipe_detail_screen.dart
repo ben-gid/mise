@@ -261,8 +261,8 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
                     ),
                   ],
                   const SizedBox(height: 28),
-                  if (recipe.description.isNotEmpty) ...[
-                    Text(recipe.description, style: theme.textTheme.bodyLarge),
+                  if (recipe.notes case final notes? when notes.isNotEmpty) ...[
+                    _Headnote(text: notes),
                     const SizedBox(height: 16),
                   ],
                   _ServingsStepper(
@@ -397,12 +397,6 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
                       flipped: _flipped,
                       accent: accent,
                     ),
-                  if (recipe.notes case final notes? when notes.isNotEmpty) ...[
-                    const SizedBox(height: 24),
-                    Text('Notes', style: theme.textTheme.titleLarge),
-                    const SizedBox(height: 8),
-                    Text(notes, style: theme.textTheme.bodyLarge),
-                  ],
                   const SizedBox(height: 16),
                   Text(
                     'Source: ${recipe.source}',
@@ -596,6 +590,69 @@ class _Credit extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// The recipe's headnote, printed above the ingredients the way a cookbook
+/// prints one: where the dish came from, when to make it, what can be swapped.
+///
+/// Cut to [_maxLines] with a More button, because this sits above the servings
+/// stepper and a four-sentence note would otherwise push the first ingredients
+/// off a phone screen. The button appears only when the text is really
+/// clipped, which depends on the width it was given — so it is measured with a
+/// [TextPainter] at that width rather than guessed from the string's length.
+class _Headnote extends StatefulWidget {
+  final String text;
+
+  const _Headnote({required this.text});
+
+  @override
+  State<_Headnote> createState() => _HeadnoteState();
+}
+
+class _HeadnoteState extends State<_Headnote> {
+  static const _maxLines = 4;
+
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = Theme.of(context).textTheme.bodyLarge;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final painter = TextPainter(
+          text: TextSpan(text: widget.text, style: style),
+          maxLines: _maxLines,
+          textDirection: Directionality.of(context),
+          textScaler: MediaQuery.textScalerOf(context),
+        )..layout(maxWidth: constraints.maxWidth);
+        final clipped = painter.didExceedMaxLines;
+        painter.dispose();
+        final cut = clipped && !_expanded;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              widget.text,
+              style: style,
+              // Both, together, or neither: an ellipsis with no maxLines
+              // limits the paragraph to a *single* line, so leaving it set
+              // while expanded would show one line of a nine-line note.
+              maxLines: cut ? _maxLines : null,
+              overflow: cut ? TextOverflow.ellipsis : TextOverflow.clip,
+            ),
+            if (clipped)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: () => setState(() => _expanded = !_expanded),
+                  child: Text(_expanded ? 'Less' : 'More'),
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 }

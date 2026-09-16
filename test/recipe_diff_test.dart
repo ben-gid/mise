@@ -9,6 +9,11 @@ import 'package:mise/recipe/recipe_models.dart';
 /// `test()` file with none of the fake-async constraints widget_test.dart has.
 void main() {
   final validJson = File('test/fixtures/valid_recipe.json').readAsStringSync();
+  const headnote =
+      'A slow-proofed focaccia with a garlic butter crust. The long cold '
+      'rest is what gives it the open crumb \u2014 the dough can sit '
+      'overnight in the fridge instead of the 2h bulk proof, and is easier '
+      'to dimple cold.';
 
   Recipe original() =>
       Recipe.fromJson(jsonDecode(validJson) as Map<String, dynamic>);
@@ -252,20 +257,18 @@ void main() {
         after: 'Rosemary Focaccia',
       ),
       (
+        kind: ChangeKind.notes,
+        label: 'Notes',
+        detail: null,
+        before: headnote,
+        after: null,
+      ),
+      (
         kind: ChangeKind.servings,
         label: 'Servings',
         detail: null,
         before: '4',
         after: '8',
-      ),
-      (
-        kind: ChangeKind.notes,
-        label: 'Notes',
-        detail: null,
-        before:
-            'The dough can rest overnight in the fridge instead of the '
-            '2h bulk proof.',
-        after: null,
       ),
     ]);
   });

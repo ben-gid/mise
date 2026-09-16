@@ -45,6 +45,25 @@ re-running build_runner. The import screen's "Copy prompt" button embeds
 `RecipeParser.schemaJson` verbatim so the LLM prompt can never drift from what the validator
 enforces — keep it reading from the live schema string, not a hardcoded copy.
 
+**One prose field, written last and printed first.** `notes` is the headnote, the way a
+cookbook sets one: where the dish comes from, when to make it, what can be substituted. It
+sits after `steps` in the schema because models emit an object in the order its properties
+are declared, so the LLM writes it with the whole recipe already in front of it — and it
+renders at the *top* of the detail screen, above the servings stepper, because a note under
+the last step is a footnote nobody reads. It replaced a separate `description`: two fields
+meant two half-filled boxes in the editor and two rows in the version diff.
+
+A real headnote is several lines, so `_Headnote` cuts it to four with a More button —
+otherwise it pushes the stepper and the first ingredients off a phone screen. The button
+appears only when the text is genuinely clipped at the width it got, measured with a
+`TextPainter`, not guessed from the string's length.
+
+Recipes saved before that carry `description`, and `Recipe.fromJson` folds it into `notes`.
+That is the chokepoint because `RecipeStore._read` goes straight through it without passing
+the validator — which is also why the schema could drop `description` outright where a
+*required* field would have bricked every recipe on disk: `toJson` never writes one, so the
+validator never sees one. The fold is deletable once every recipe has been saved once.
+
 **Ingredient ids are a live-scaling mechanism, not decoration.** Step content references
 ingredients as `{0001}` and never repeats the amount in prose. `recipe_scaling.dart`
 substitutes them at render time with amounts scaled by the servings stepper. JSON Schema
@@ -248,6 +267,13 @@ constructed once in `main()` and passed down by constructor.
 - A widget test asserting on an amount has to know which unit settings are live: at the
   metric default `1 tsp` of yeast renders as `5 ml`, so `find.text('1 tsp')` only works in
   a test that set `volumeSystem` to imperial first.
+- `TextOverflow.ellipsis` with `maxLines: null` limits a paragraph to a **single line**.
+  The two go together or neither does — see `_Headnote`, where leaving the ellipsis set
+  while expanded showed one line of a nine-line note.
+- The headnote leads the editor form, so on a default 600px surface the first ingredient
+  row is below the fold and unbuilt. `openEditor` in `widget_test.dart` calls `tallSurface`
+  for that reason; a test needing more than that sets its own size *after* the open, or the
+  helper overrides it.
 - A route already pushed on the Navigator does **not** repaint when the unit notifiers
   change. Rebuilding `MaterialApp` rebuilds the Navigator but not the element subtrees of
   live routes, and unlike `Theme` there is no InheritedWidget carrying the dependency across

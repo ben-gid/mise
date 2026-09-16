@@ -236,4 +236,9 @@ String _prompt(RecipeParser parser) =>
     '- Prefer sources whose image urls are stable and public — Wikimedia '
     'Commons especially — over guessing a food blog CDN path, which is '
     'usually hashed or dated and will not resolve.\n'
+    '- Write notes last, once the rest of the recipe is on the page: it is '
+    'the headnote the app prints above the ingredients, so it wants what a '
+    'cookbook puts there — where the dish comes from, when to make it, what '
+    'can be substituted, the tip that decides whether it works. Prose, not a '
+    'recap of the steps.\n'
     '- created_at is the current time in ISO 8601.';

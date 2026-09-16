@@ -15,7 +15,6 @@ enum ChangeKind {
   step('step', countable: true),
   tag('tag', countable: true),
   title('title'),
-  description('description'),
   servings('servings'),
   notes('notes'),
   image('image'),
@@ -63,14 +62,13 @@ List<RecipeChange> diffRecipes(Recipe from, Recipe to) {
 Iterable<RecipeChange> _scalars(Recipe from, Recipe to) sync* {
   final fields = [
     (ChangeKind.title, 'Title', from.title, to.title),
-    (ChangeKind.description, 'Description', from.description, to.description),
+    (ChangeKind.notes, 'Notes', from.notes, to.notes),
     (
       ChangeKind.servings,
       'Servings',
       '${from.baseServings}',
       '${to.baseServings}',
     ),
-    (ChangeKind.notes, 'Notes', from.notes, to.notes),
     // Joined rather than set-diffed like tags, because these are *ordered*:
     // promoting the second url to first is a real change that a set would
     // report as none. Whole urls, not hosts — swapping one photo for another

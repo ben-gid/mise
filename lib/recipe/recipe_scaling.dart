@@ -71,7 +71,7 @@ String formatForSharing(
   final factor = scaleFactor(recipe, servings);
   return [
     recipe.title,
-    if (recipe.description.isNotEmpty) '\n${recipe.description}',
+    if (recipe.notes case final notes? when notes.isNotEmpty) '\n$notes',
     '\nServes $servings',
     '\nIngredients',
     for (final ingredient in recipe.ingredients)
@@ -82,7 +82,6 @@ String formatForSharing(
       '${index + 1}. ${step.title}'
           '${step.timerSeconds == null ? '' : ' (${formatDuration(step.timerSeconds!)})'}\n'
           '   ${renderContent(step, recipe, factor, flipped: flipped)}',
-    if (recipe.notes case final notes? when notes.isNotEmpty) '\nNotes\n$notes',
     '\nSource: ${recipe.source}',
   ].join('\n');
 }

@@ -303,7 +303,6 @@ void main() {
       volumeSystem.value = UnitSystem.metric;
       final recipe = Recipe(
         title: 'Loaf',
-        description: '',
         baseServings: 1,
         ingredients: const [_flour],
         steps: const [

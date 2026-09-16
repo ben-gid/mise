@@ -73,10 +73,15 @@ class RecipeStep {
 @JsonSerializable(fieldRename: FieldRename.snake, explicitToJson: true)
 class Recipe {
   final String title;
-  final String description;
   final int baseServings;
   final List<Ingredient> ingredients;
   final List<RecipeStep> steps;
+
+  /// The headnote, shown above the ingredients rather than under the steps —
+  /// where the dish comes from, when to make it, what can be swapped. The LLM
+  /// writes it last, once it has the whole recipe in front of it, which is why
+  /// it sits after [steps] in the schema: models emit an object in the order
+  /// its properties are declared.
   final String? notes;
 
   /// Photos of the finished dish, best first — `https` urls the LLM found, or a
@@ -95,7 +100,6 @@ class Recipe {
 
   const Recipe({
     required this.title,
-    required this.description,
     required this.baseServings,
     required this.ingredients,
     required this.steps,
@@ -106,7 +110,22 @@ class Recipe {
     required this.createdAt,
   });
 
-  factory Recipe.fromJson(Map<String, dynamic> json) => _$RecipeFromJson(json);
+  /// Recipes saved before the headnote replaced the separate `description`
+  /// field carry both; fold the old one in rather than dropping it on the
+  /// floor. This is the chokepoint for it because [RecipeStore] reads files
+  /// straight through here without going past the validator — which is also
+  /// why the schema could drop `description` outright: it never sees one.
+  ///
+  /// ponytail: delete once the recipes on this phone have each been saved.
+  factory Recipe.fromJson(Map<String, dynamic> json) =>
+      _$RecipeFromJson(_foldDescription(json));
+
+  static Map<String, dynamic> _foldDescription(Map<String, dynamic> json) {
+    final old = (json['description'] as String?)?.trim() ?? '';
+    if (old.isEmpty) return json;
+    final notes = (json['notes'] as String?)?.trim() ?? '';
+    return {...json, 'notes': notes.isEmpty ? old : '$old\n\n$notes'};
+  }
   Map<String, dynamic> toJson() => _$RecipeToJson(this);
 
   Ingredient? ingredientById(String id) =>

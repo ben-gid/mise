@@ -55,7 +55,6 @@ enum _UnusedAction { edit, remove, save }
 
 class _RecipeEditScreenState extends State<RecipeEditScreen> {
   final _title = TextEditingController();
-  final _description = TextEditingController();
   final _servings = TextEditingController();
   final _tags = TextEditingController();
   final _notes = TextEditingController();
@@ -82,7 +81,6 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
   @override
   void dispose() {
     _title.dispose();
-    _description.dispose();
     _servings.dispose();
     _tags.dispose();
     _notes.dispose();
@@ -105,7 +103,6 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
   /// hands control back to the form.
   void _load(Recipe recipe) {
     _title.text = recipe.title;
-    _description.text = recipe.description;
     _servings.text = '${recipe.baseServings}';
     _tags.text = recipe.tags.join(', ');
     _notes.text = recipe.notes ?? '';
@@ -189,7 +186,6 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
     final ingredients = _draftIngredients();
     return Recipe(
       title: _title.text.trim(),
-      description: _description.text.trim(),
       baseServings:
           int.tryParse(_servings.text.trim()) ?? widget.recipe.baseServings,
       ingredients: ingredients,
@@ -599,12 +595,15 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
       ],
     ),
     const SizedBox(height: 12),
+    // Up here rather than at the foot of the form, because this is where it
+    // prints: above the ingredients, the way a cookbook sets a headnote.
     TextField(
-      controller: _description,
+      controller: _notes,
       minLines: 2,
-      maxLines: 4,
+      maxLines: 5,
       decoration: const InputDecoration(
-        labelText: 'Description',
+        labelText: 'Notes',
+        helperText: 'Where it comes from, when to make it, what to swap',
         border: OutlineInputBorder(),
       ),
     ),
@@ -637,16 +636,6 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
       ),
     _AddButton(label: 'Add step', onPressed: _addStep),
 
-    const SizedBox(height: 20),
-    TextField(
-      controller: _notes,
-      minLines: 2,
-      maxLines: 5,
-      decoration: const InputDecoration(
-        labelText: 'Notes',
-        border: OutlineInputBorder(),
-      ),
-    ),
   ];
 }
 
