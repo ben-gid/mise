@@ -55,8 +55,15 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
 
   /// What [_photos] was built for, so a theme or metrics change re-entering
   /// [didChangeDependencies] doesn't restart the chain and re-open a hero that
-  /// has already closed.
+  /// has already closed. Both halves, because an edit that fixes a useless
+  /// `image_query` leaves the urls untouched — watching only those would leave
+  /// the old photo up.
   List<String>? _photoUrls;
+  String? _photoQuery;
+
+  /// Guards [_keepFoundPhoto] against firing twice before its write lands —
+  /// the chain calls back more than once on the way to a winner.
+  bool _keeping = false;
 
   /// Eases the hero shut when every url has failed. Finite and runs at most
   /// once per recipe, so `pumpAndSettle` still returns (see CLAUDE.md).
@@ -88,9 +95,13 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
   /// Called again from [_adopt]: an edit that fixes a dead url has to reopen
   /// the hero, not leave it shut on the previous version's failure.
   void _startPhotos() {
-    if (listEquals(_photoUrls, _recipe.imageUrls)) return;
+    if (listEquals(_photoUrls, _recipe.imageUrls) &&
+        _photoQuery == _recipe.imageQuery) {
+      return;
+    }
     _photos?.dispose();
     _photoUrls = _recipe.imageUrls;
+    _photoQuery = _recipe.imageQuery;
     // Open for a recipe that carries urls — the first is optimistically the
     // winner, so the photo is there on the first frame. Shut for one that
     // carries none: the Wikipedia fallback is a round trip away, and a hero
@@ -109,15 +120,99 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
           // A no-op for a recipe that started open, which is every recipe with
           // urls of its own.
           _close.reverse();
+          _keepFoundPhoto();
         }
       },
       // Always, not only as a rescue for urls that failed: the import prompt
-      // now tells the model to leave image_urls empty rather than invent one,
-      // so a recipe with no urls at all is the common case and the one most
-      // in need of a photo.
+      // tells the model to leave image_urls alone, so a recipe with no urls at
+      // all is the common case and the one most in need of a photo.
       title: _recipe.title,
+      query: _recipe.imageQuery,
     );
     _photos!.resolve(createLocalImageConfiguration(context));
+  }
+
+  /// Writes down the photo the search found, the first time it finds one.
+  ///
+  /// Only a search result, never a Wikipedia stand-in — [winnerFromSearch] is
+  /// the difference, and pinning a recipe to the plain fallback is what this
+  /// change exists to stop. Only when the recipe has no photo of its own, so a
+  /// deliberate pick is never overwritten.
+  ///
+  /// The point is not the pixels, which are cached anyway: it is that the list
+  /// row and the next cold start show this photo without spending the search
+  /// again, and that the recipe stops depending on a memo that dies with the
+  /// process. It cannot loop — once this lands, `image_urls` is no longer empty
+  /// and the rebuilt chain's winner comes from there rather than from a search.
+  Future<void> _keepFoundPhoto() async {
+    if (_keeping || _recipe.imageUrls.isNotEmpty) return;
+    final found = _photos;
+    if (found == null || !found.winnerFromSearch) return;
+    _keeping = true;
+    try {
+      await _setPhoto(found.winner!);
+    } finally {
+      _keeping = false;
+    }
+  }
+
+  /// Pins [url] onto the recipe, in place.
+  ///
+  /// [RecipeStore.save] and not `saveVersion`: the id is
+  /// `<createdAtMillis>-<title-slug>` and neither half moves here, so this
+  /// rewrites the same file under the same id. That is what keeps the rating
+  /// attached — ratings are keyed by id — and what keeps "I picked a nicer
+  /// picture" out of the version history, where it would sit between two real
+  /// edits pretending to be one.
+  ///
+  /// And deliberately not [_adopt], which clears the stars. [_adopt] is right
+  /// to: every path into it mints a new id, and leaving five stars on a version
+  /// nobody has cooked would be a lie. Here there is no new version to lie
+  /// about.
+  ///
+  /// Unvalidated, like the list screen's Undo, which is the other caller that
+  /// re-saves a recipe that already parsed once. The url came from our own
+  /// search or our own picker, not from a model.
+  Future<void> _setPhoto(String url) async {
+    // Recipe has no copyWith; a modified copy goes back through the map.
+    final updated = Recipe.fromJson({
+      ..._recipe.toJson(),
+      'image_urls': [url],
+    });
+    await widget.store.save(updated);
+    if (!mounted) return;
+    setState(() => _recipe = updated);
+    _startPhotos();
+  }
+
+  /// Opens the photo picker: the stock photos for this dish, plus the cook's
+  /// own camera.
+  ///
+  /// The search is awaited *before* the sheet opens rather than inside it. A
+  /// spinner in a modal is an indefinite animation and `pumpAndSettle` never
+  /// returns on one (CLAUDE.md), and there is nothing to wait for anyway — the
+  /// hero ran this exact query on the way in and [pexelsPhotos] is memoised.
+  ///
+  /// Falls back to the title when a recipe carries no `image_query`. Those are
+  /// the wrong words to spend a chain link on — "Nonna's Sunday gravy" matches
+  /// nothing in a photo library — but the right ones to hand a human who can
+  /// look at what comes back and judge.
+  Future<void> _pickPhoto() async {
+    final photos = await pexelsPhotos(_recipe.imageQuery ?? _recipe.title);
+    if (!mounted) return;
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => _PhotoSheet(photos: photos, store: widget.store),
+    );
+    if (picked == null || !mounted) return;
+    // The device photo stays the editor's job: it writes a file and needs the
+    // parser, and a second copy of that path here is what CLAUDE.md warns off.
+    // It costs a version, where a stock pick does not — an asymmetry worth
+    // less than a duplicated picker.
+    if (picked == _ownPhoto) return _edit(pickImage: true);
+    await _setPhoto(picked);
   }
 
   /// Flips one ingredient between weight and volume, for the length of this
@@ -423,16 +518,15 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
   /// not one wearing generated art in a picture's place.
   Widget _hero(BuildContext context, Color accent) {
     final actions = [
-      // Only where there is nothing to look at — a stand-in from Wikipedia
-      // counts, and a recipe wearing one is not the one crying out for a
-      // photo. The one image that cannot 404 is the one already on the phone,
-      // and until now nothing on this screen said the editor could take it.
-      if (_photos?.winner == null)
-        IconButton(
-          onPressed: () => _edit(pickImage: true),
-          tooltip: 'Add photo',
-          icon: const Icon(Icons.add_a_photo_outlined),
-        ),
+      // Unconditional, where this used to appear only on a recipe with nothing
+      // to look at. With a photo search in the chain almost every recipe has
+      // something, so that gate would hide the button in exactly the case it
+      // now exists for: a picture loaded, and it is the wrong one.
+      IconButton(
+        onPressed: _pickPhoto,
+        tooltip: 'Choose photo',
+        icon: const Icon(Icons.add_a_photo_outlined),
+      ),
       IconButton(
         onPressed: _openHistory,
         tooltip: 'Version history',
@@ -788,6 +882,108 @@ class _StepCard extends StatelessWidget {
               style: theme.textTheme.bodyLarge,
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// What [_PhotoSheet] returns for "use my own photo", rather than a url. It
+/// cannot collide with a real one: nothing names a file `pick`.
+const _ownPhoto = 'mise://pick';
+
+/// The photo picker, and the app's one bottom sheet.
+///
+/// A dialog is the modal everywhere else here, and this is deliberately not
+/// one: an `AlertDialog` is a letterbox, and this is nine photographs on a
+/// phone. It takes an already-resolved list rather than a Future for the reason
+/// spelled out on [_RecipeDetailScreenState._pickPhoto] — a spinner in a modal
+/// is an animation `pumpAndSettle` waits on forever.
+class _PhotoSheet extends StatelessWidget {
+  final List<String> photos;
+  final RecipeStore store;
+
+  const _PhotoSheet({required this.photos, required this.store});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SafeArea(
+      child: GlassPanel(
+        margin: const EdgeInsets.all(12),
+        // Opaque, unlike every other panel. Their translucent fill is tuned
+        // for the plain page backdrop; a sheet sits on top of the recipe's
+        // photo and text, and at 8% in the dark theme that read straight
+        // through.
+        fill: theme.colorScheme.surface,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Choose a photo', style: theme.textTheme.titleMedium),
+              const SizedBox(height: 12),
+              // First, and outside the grid: the one photo that cannot 404 and
+              // the only one that is actually of this dish rather than of
+              // something that looks like it.
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.photo_camera_outlined),
+                title: const Text('Use my own photo'),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(pillRadius),
+                ),
+                onTap: () => Navigator.pop(context, _ownPhoto),
+              ),
+              if (photos.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  child: Text(
+                    'No photos found. Edit the recipe and describe what it '
+                    'looks like in two or three words.',
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                )
+              else ...[
+                const SizedBox(height: 8),
+                ConstrainedBox(
+                  // Half the screen, so the sheet stays a sheet: the grid
+                  // scrolls inside it rather than growing into a full page.
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.sizeOf(context).height * 0.5,
+                  ),
+                  child: GridView.count(
+                    crossAxisCount: 3,
+                    shrinkWrap: true,
+                    mainAxisSpacing: 8,
+                    crossAxisSpacing: 8,
+                    children: [
+                      for (final url in photos)
+                        InkWell(
+                          onTap: () => Navigator.pop(context, url),
+                          borderRadius: BorderRadius.circular(pillRadius),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(pillRadius),
+                            child: Image(
+                              // Through the chokepoint, so a tile and the hero
+                              // can never disagree about what a url paints as.
+                              image: imageFor(url, store)!,
+                              fit: BoxFit.cover,
+                              // No loadingBuilder — see the class docs.
+                              errorBuilder: (_, _, _) =>
+                                  ColoredBox(color: glassFill(context)),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text('Photos from Pexels', style: theme.textTheme.labelSmall),
+              ],
+            ],
+          ),
         ),
       ),
     );

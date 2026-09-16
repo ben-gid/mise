@@ -73,6 +73,10 @@ Iterable<RecipeChange> _scalars(Recipe from, Recipe to) sync* {
     // promoting the second url to first is a real change that a set would
     // report as none. Whole urls, not hosts — swapping one photo for another
     // on the same site is a change too.
+    // Shown because it decides the picture: rewriting this swaps the recipe's
+    // photo without any url changing, which would otherwise read as no change
+    // at all.
+    (ChangeKind.image, 'Photo search', from.imageQuery, to.imageQuery),
     (
       ChangeKind.image,
       'Images',

@@ -12,6 +12,7 @@ flutter analyze                           # must stay clean
 dart run build_runner build               # after ANY change to recipe_models.dart
 flutter run                               # a phone/tablet device or emulator — the real target
 flutter run -d linux                      # desktop, only to eyeball a change quickly
+flutter run --dart-define-from-file=env.json   # with stock photos; see env.example.json
 ```
 
 `--delete-conflicting-outputs` was removed in this build_runner version and is ignored — drop it.
@@ -139,35 +140,52 @@ measured on a scale, which shows `1 lb 9.1 oz` and has no decimal-pound mode at 
 `¾ cup + 1½ tbsp` — two terms, because snapping to one rung puts 200 ml 11% off. Imperial
 weight below ~½ oz stays in grams, where a tenth of an ounce is 13% of 5 g.
 
-**A recipe's photos are urls, and that is what keeps them cheap.** `image_urls`
-holds up to three, best first — `https` links the LLM found, or a single
-`mise://<filename>` for a photo picked off the device and copied in beside the
-recipes by `RecipeStore.addImage`. It once asked for three *even where the model was
-unsure*, on the theory that later entries cover for a dead first one. They do not:
-guessed blog CDN paths are hashed and dated, and three guesses from one model are one
-guess sampled three times — they 404 together. The prompt now asks for a url only where
-the model is confident it exists, and for none otherwise. The cap stays at three because
-tightening it to one would make every recipe already on disk with three urls fail its
-next save, the same way a required field would. Because it is an
-ordinary list of strings, `saveVersion` carries it forward, the version diff
-sees it, and the editor round-trips it — none of which a binary `<id>.image`
-sidecar would have got for free. When every url fails — or a recipe carries none, which
-the import prompt now asks for outright rather than have the model invent one —
-`wikipediaImage` looks the title up on the MediaWiki `pageimages` API and the chain
-takes that as its last link. It is a photo of the *dish*, not of this recipe, and
-`creditFor` says "Wikipedia" rather than `upload.wikimedia.org` so the reader can tell.
-A miss (no article, offline, a 403) reads as null and the recipe is one with no photo,
-which is when the detail screen offers "Add photo" — routed through the editor's
-existing picker, never a second save path. The urls are relative on purpose where local:
-iOS hands the app container a new UUID on every update, so an absolute path
-saved today is a dead path after the next release. `https` only, never `http` —
-phones block cleartext, so a url that could never load is rejected at the
-schema.
+**The model describes the photo; the app finds it.** `image_query` is the LLM's whole
+half: two to four words for what the finished dish *looks like*, in the vocabulary of a
+stock photo search ("creamy mushroom pasta", never "Nonna's Sunday gravy"). It sits
+after `notes` in the schema for the same reason `notes` sits after `steps`. The app
+searches Pexels with it, because the goal is a *beautiful* photo, and the model used to
+be asked for urls instead — which, told to prefer stable sources, meant a Wikimedia
+Commons photo nearly every time: the same plain picture the Wikipedia fallback finds
+for free. The trade is accuracy: a Pexels photo is of something that looks like the
+dish, not of this recipe, and `creditFor` says "Pexels" so a reader can tell.
+
+`image_urls` is **app-owned**: the one photo the cook picked, or a `mise://<filename>`
+copied in beside the recipes by `RecipeStore.addImage`. The prompt tells the model to
+leave it out. It stays a list capped at three rather than becoming a string because
+`saveVersion` carries it forward, the version diff sees it and the editor round-trips it.
+The urls are relative on purpose where local: iOS hands the app container a new UUID on
+every update, so an absolute path saved today is dead after the next release. `https`
+only, never `http` — phones block cleartext.
+
+The chain is own urls → `pexelsPhotos(image_query)` → `wikipediaImage(title)` → no
+photo, as a queue of fallbacks in `ImageChain` that only shrinks — that is its whole
+termination argument. Wikipedia is demoted, not deleted: it is a photo of *this* dish,
+and the only link that works in a build with no key. `pexelsPhotos` memoises the whole
+nine-result page per query for the run, so the hero takes the first and the picker sheet
+shows all nine off one request. The key is compile-time (`PEXELS_KEY`, from a gitignored
+`env.json`); an empty key returns no photos rather than failing, which is also what keeps
+`flutter test` offline.
+
+**A picture is not a version.** The first time the detail screen's chain lands on a
+search result *that has actually loaded*, it writes that url into `image_urls` — so the
+list and the next cold start show it without searching again. `winnerFromSearch` is the
+gate, and it requires the decode, not just `winner`, which is optimistic: keeping a url
+before it loads writes a dead link into the recipe for good. Only the detail screen
+keeps a photo; fifty list rows doing it would be fifty concurrent writes. The
+always-visible "Choose photo" action opens a bottom sheet (the app's only one — nine
+photos on a phone, where a dialog is a letterbox) with the results plus "Use my own
+photo". Both a kept result and a pick save through `RecipeStore.save`, **not**
+`saveVersion` and **not** `_adopt`: the id is `<createdAtMillis>-<title-slug>` and
+neither half moves, so the same file is rewritten, the rating stays attached and history
+gets no entry. `_adopt` clears the stars, correctly, because every other caller minted a
+new id. "Use my own photo" still goes through the editor's picker and `saveVersion` —
+an asymmetry that is cheaper than a second `ImagePicker` path.
 
 [lib/recipe/recipe_image.dart](lib/recipe/recipe_image.dart) is the chokepoint,
 the way `amountLabel` is for amounts: `imageFor` turns a url into something
 paintable, `creditFor` turns it into the host shown under the photo, and
-`ImageChain` walks the list until one loads. `imageFor` hands back a `CachedNetworkImageProvider`, not a plain `NetworkImage`: `dart:io`'s HttpClient has no HTTP cache at all — it ignores `Cache-Control` and `ETag` — and Flutter's `ImageCache` dies with the process, so every cold start re-downloaded every photo, and a kitchen with no signal showed none. The `_wikipedia` memo is still per-run; only the images survive a restart. The chain is **headless** — it
+`ImageChain` walks the list until one loads. `imageFor` hands back a `CachedNetworkImageProvider`, not a plain `NetworkImage`: `dart:io`'s HttpClient has no HTTP cache at all — it ignores `Cache-Control` and `ETag` — and Flutter's `ImageCache` dies with the process, so every cold start re-downloaded every photo, and a kitchen with no signal showed none. The `_pexels` and `_wikipedia` memos are still per-run; only the images survive a restart. The chain is **headless** — it
 resolves through the image cache without painting — because the detail screen
 *sizes its app bar* on the outcome, and a widget that rendered the chain and
 reported upwards would loop: child says exhausted, parent shrinks, child
@@ -179,13 +197,13 @@ which url wins.
 shut and the screen becomes the plain one, rather than sitting open on generated
 art in a picture's place. That art is still the *list thumbnail* fallback, where
 a 64px tile has nothing to collapse into — it shows through while the chain is
-looking and stays put when it comes back with nothing. The list runs the chain
-too now, in `_Cover`, so a row shows the same photo the hero settles on. It used
-to skip it, on the grounds that several network attempts per row in a scrolling
-list is a real cost; that cost is smaller since the prompt stopped asking for
-padded guesses, so most rows spend no attempt on urls of their own, and
-`wikipediaImage` is memoised per title — shared across rows and with the detail
-screen. Nothing deletes a photo: a
+looking and stays put when it comes back with nothing. The list runs the full
+chain too, in `_Cover`, query included, so a row shows the same photo the hero
+settles on. Both memos are shared across rows and with the detail screen, so a
+library costs one Pexels request per distinct query on first scroll against a
+200/hour free tier. Both chain owners restart on a changed query as well as
+changed urls — an edit that fixes a useless query leaves every url alone. Nothing
+deletes a photo: a
 deleted recipe leaves its file behind, because the list screen's Undo re-saves
 the recipe and would otherwise find the picture gone.
 
@@ -235,6 +253,16 @@ constructed once in `main()` and passed down by constructor.
 - `image_picker` has no Linux implementation, so "Choose photo" throws
   `MissingPluginException` on the desktop harness and answers with a SnackBar.
   Expect that, the same way the share button degrades to `mailto:` there.
+- A `Future` made in the fake-async zone never delivers inside `tester.runAsync`.
+  `seedPexels` stores one, so call it *inside* `runAsync`; seeded above it, the chain
+  waits on the seed until the test times out, with no error. `pumpPhotos` in
+  `widget_test.dart` takes a `search:` map and seeds it in the right place. The memo
+  also outlives a test, which is why that file's `tearDown` calls `forgetPexels`.
+- `_draft()` in the editor builds a `Recipe` field by field. A field added to `Recipe`
+  but not to `_draft()` is erased by the first form save, with no error — that is why
+  it carries `imageQuery` next to `source` and `createdAt`.
+- The picker awaits `pexelsPhotos` *before* opening the sheet, never inside it. A
+  spinner in a modal is an indefinite animation, and `pumpAndSettle` never returns.
 - The detail screen is a `CustomScrollView`, not a `ListView`, and passes
   `appBar: null` — a `SliverAppBar` is not a `PreferredSizeWidget`, so it cannot
   go in `GlassScaffold.appBar`. Its frost is driven off `SliverLayoutBuilder`

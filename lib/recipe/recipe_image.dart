@@ -20,6 +20,13 @@ import 'recipe_store.dart';
 /// an absolute path. See [RecipeStore.addImage] for why it can't be absolute.
 const _localScheme = 'mise://';
 
+/// Read at compile time: `flutter run --dart-define-from-file=env.json`.
+///
+/// Empty is a supported state, not a broken one. A checkout with no key — and
+/// every run of `flutter test` — simply skips the stock photo link of the chain
+/// and falls through to Wikipedia, which is what keeps the suite offline.
+const _pexelsKey = String.fromEnvironment('PEXELS_KEY');
+
 /// Something to paint, or null when the recipe has no usable image.
 ///
 /// Never throws on a bad url. A hallucinated link is the expected failure for
@@ -58,9 +65,86 @@ String? creditFor(String? url) {
   // what anyone calls it. Naming Wikipedia also says the quiet part out loud:
   // this is a photo of the dish, not a photo of this recipe.
   if (host.endsWith('wikimedia.org')) return 'Wikipedia';
+  // images.pexels.com is where the file lives and is not what anyone calls it.
+  // Naming Pexels is also the price of the photos — their terms ask for it —
+  // and it says the quiet part out loud the same way Wikipedia does: this is a
+  // photograph of something that looks like the dish, not of this recipe.
+  if (host.endsWith('pexels.com')) return 'Pexels';
   // Guarded rather than replaceFirst, which would eat the 'www.' out of the
   // middle of a host like 'mywww.example.com'.
   return host.startsWith('www.') ? host.substring(4) : host;
+}
+
+/// Stock photographs of what the dish looks like, best first.
+///
+/// Keyed on the recipe's own `image_query` rather than its title, because a
+/// title is a name — "Nonna's Sunday gravy" — and a photo library is indexed by
+/// what is in the frame. That is the whole trade this makes: the picture is
+/// beautiful and is of *something that looks like* the dish, where
+/// [wikipediaImage] is plain and is of the dish itself. [creditFor] says
+/// "Pexels" so a reader can tell which they are looking at.
+///
+/// Holds the whole page rather than the winner: the chain takes the first and
+/// the picker shows the rest, and between them that is one request.
+Future<List<String>> pexelsPhotos(String query) =>
+    _pexels.putIfAbsent(query, () => _fetchPexels(query));
+
+/// Per run, keyed by query, the same bargain [wikipediaImage] makes: two
+/// recipes that look alike share one lookup, and only the *images* survive a
+/// restart.
+final _pexels = <String, Future<List<String>>>{};
+
+/// Drops every seeded or fetched result, so one test's photos do not show up
+/// in the next — the memo outlives a test the way it outlives a screen.
+@visibleForTesting
+void forgetPexels() => _pexels.clear();
+
+/// Lets a test drive the hit path. Nothing under `flutter test` reaches a
+/// network — the binding answers every https request with 400 — so the only way
+/// to exercise "the chain took a stock photo" is to have the answer in hand.
+///
+/// Call it inside `tester.runAsync`, never before. The seed is a Future, and
+/// one made in the fake-async zone never delivers to a chain walking under the
+/// real clock: the test just waits until it times out.
+@visibleForTesting
+void seedPexels(String query, List<String> urls) =>
+    _pexels[query] = Future.value(urls);
+
+Future<List<String>> _fetchPexels(String query) async {
+  // No key is the normal state of a fresh checkout and of the test suite.
+  // Skipping quietly beats a link in the chain that always errors.
+  if (_pexelsKey.isEmpty || query.trim().isEmpty) return const [];
+  final uri = Uri.https('api.pexels.com', '/v1/search', {
+    'query': query,
+    // One page serves both the hero and the picker's three-by-three grid.
+    'per_page': '9',
+    // A hero is a wide band and a list tile is a square; a portrait shot crops
+    // to the middle of its subject in both.
+    'orientation': 'landscape',
+  });
+  final client = HttpClient();
+  try {
+    final request = await client.getUrl(uri);
+    // Pexels takes the bare key — no 'Bearer'.
+    request.headers.set(HttpHeaders.authorizationHeader, _pexelsKey);
+    final response = await request.close();
+    if (response.statusCode != HttpStatus.ok) return const [];
+    final body = jsonDecode(await response.transform(utf8.decoder).join());
+    return [
+      for (final photo in (body['photos'] as List? ?? const []))
+        // 'large' is 940px. Not the larger rendition: the picker's tile and the
+        // hero then share one cache entry, so a photo the sheet has already
+        // shown is on disk by the time it is picked.
+        if (((photo as Map)['src'] as Map?)?['large'] case final String url)
+          url,
+    ];
+  } catch (_) {
+    // Offline, a 429 off the free tier, malformed JSON — none of them should
+    // take a recipe screen down, so they all read as "no photos".
+    return const [];
+  } finally {
+    client.close();
+  }
 }
 
 /// A photo of the *dish*, for when a recipe's own urls have all failed.
@@ -133,22 +217,58 @@ class ImageChain {
   /// chain is left [exhausted]. Callers `setState` from here.
   final VoidCallback onChanged;
 
-  /// The dish, for one last try at [wikipediaImage] once the recipe's own urls
-  /// are spent — or null to skip it. The editor's preview passes null: "does
-  /// the url I typed work" is a question a stand-in photo answers wrongly.
+  /// The dish, for one last try at [wikipediaImage] once everything else is
+  /// spent — or null to skip it. The editor's preview passes null: "does the
+  /// url I typed work" is a question a stand-in photo answers wrongly.
   final String? title;
 
-  /// The recipe's urls, plus the Wikipedia fallback once it resolves. Copied
-  /// rather than held: this list grows, and the caller's is the model's.
+  /// What the dish looks like, for [pexelsPhotos] — or null to skip it. Null in
+  /// the editor's preview for the same reason [title] is.
+  final String? query;
+
+  /// The recipe's urls, plus whatever the fallbacks turn up. Copied rather than
+  /// held: this list grows, and the caller's is the model's.
   final List<String> _urls;
 
-  ImageChain(List<String> urls, this.store, this.onChanged, {this.title})
-    : _urls = List.of(urls);
+  ImageChain(
+    List<String> urls,
+    this.store,
+    this.onChanged, {
+    this.title,
+    this.query,
+  }) : _urls = List.of(urls);
+
+  /// The fallbacks left to try, in order: a stock photograph of what the dish
+  /// looks like, then a photo of the dish itself from Wikipedia.
+  ///
+  /// Wikipedia is last rather than deleted. It is a picture of *this* dish
+  /// where the search is a picture of something that merely looks like it, so
+  /// it is the better answer whenever the search comes back empty — and it is
+  /// the only answer at all in a build with no API key.
+  ///
+  /// A queue popped as it is spent, rather than a flag per stage. That is the
+  /// whole termination argument: a fallback whose url also fails comes straight
+  /// back through [_finish] and finds a shorter list every time.
+  late final List<Future<String?> Function()> _fallbacks = [
+    if (query != null)
+      () async {
+        final photos = await pexelsPhotos(query!);
+        return _fromSearch = photos.isEmpty ? null : photos.first;
+      },
+    if (title != null) () => wikipediaImage(title!),
+  ];
+
+  /// What the photo search turned up, if anything, so [winnerFromSearch] can
+  /// tell it from a Wikipedia consolation prize.
+  String? _fromSearch;
+
+  /// The url that has actually decoded, as opposed to [winner], which is
+  /// optimistic and names a url before it has loaded.
+  String? _loaded;
 
   int _index = 0;
   bool _settled = false;
   bool _disposed = false;
-  bool _triedWikipedia = false;
   ImageConfiguration _config = ImageConfiguration.empty;
   ImageStream? _stream;
   ImageStreamListener? _listener;
@@ -161,6 +281,17 @@ class ImageChain {
   /// Every url failed, or there were none to begin with. A recipe in this state
   /// reads as a recipe with no photo.
   bool get exhausted => _settled;
+
+  /// Whether what is on screen came from [pexelsPhotos] *and has loaded*.
+  ///
+  /// The detail screen keeps a photo that answers true and leaves one that
+  /// answers false where it is: pinning a recipe to the plain Wikipedia stand-in
+  /// is the thing the search exists to stop. Loaded, not merely [winner],
+  /// because [winner] is optimistic — keeping a url before it decodes would
+  /// write a dead link into the recipe for good, and every visit after would
+  /// spend an attempt on it.
+  bool get winnerFromSearch =>
+      winner != null && winner == _fromSearch && winner == _loaded;
 
   void resolve(ImageConfiguration config) {
     // Kept so the Wikipedia fallback, which arrives a round trip later, can
@@ -178,7 +309,13 @@ class ImageChain {
       return;
     }
     _stream = provider.resolve(config);
-    _listener = ImageStreamListener((_, _) {}, onError: (_, _) => _advance());
+    final url = _urls[_index];
+    _listener = ImageStreamListener((_, _) {
+      // Once per url: an animated image reports every frame.
+      if (_loaded == url) return;
+      _loaded = url;
+      onChanged();
+    }, onError: (_, _) => _advance());
     _stream!.addListener(_listener!);
   }
 
@@ -196,22 +333,20 @@ class ImageChain {
     resolve(_config);
   }
 
-  /// The recipe's own urls are spent. Before settling, one last try at a photo
-  /// of the dish itself — [_triedWikipedia] because a fallback that also fails
-  /// comes straight back through here.
+  /// The urls in hand are spent. Take the next fallback, or settle when there
+  /// are none left.
   ///
-  /// While the lookup is in flight the chain is neither settled nor pointing at
-  /// a url, which is the same "still loading" state as a network image that
+  /// While a lookup is in flight the chain is neither settled nor pointing at a
+  /// url, which is the same "still loading" state as a network image that
   /// hasn't arrived. The hero stays open rather than closing and reopening.
   void _finish() {
     if (_settled) return;
-    if (title == null || _triedWikipedia) {
+    if (_fallbacks.isEmpty) {
       _settled = true;
       onChanged();
       return;
     }
-    _triedWikipedia = true;
-    wikipediaImage(title!).then((url) {
+    _fallbacks.removeAt(0)().then((url) {
       if (_disposed) return;
       if (url != null) {
         _urls.add(url);

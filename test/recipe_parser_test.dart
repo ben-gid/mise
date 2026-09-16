@@ -147,9 +147,41 @@ void main() {
     });
   });
 
-  /// The urls arrive from an LLM, which is told to give three even where it is
-  /// unsure of any one of them — so this is a trust boundary, not a
-  /// convenience. Three is a cap, not a target.
+  /// The model's half of the photo: words, not a url. Nullable because toJson
+  /// writes a null for a recipe without one, and every file on disk has to
+  /// re-validate.
+  group('image_query', () {
+    test('the fixture\'s query arrives intact', () {
+      expect(parser.parse(validJson).imageQuery, 'rustic focaccia bread');
+    });
+
+    test('is optional, and absent reads as null', () {
+      final dropped = mutated((r) => r.remove('image_query'));
+      expect(parser.parse(dropped).imageQuery, isNull);
+    });
+
+    test('accepts an explicit null, the shape toJson writes', () {
+      final nulled = mutated((r) => r['image_query'] = null);
+      expect(parser.parse(nulled).imageQuery, isNull);
+    });
+
+    test('survives a save round trip', () {
+      final recipe = parser.parse(validJson);
+      final again = parser.parse(jsonEncode(recipe.toJson()));
+      expect(again.imageQuery, recipe.imageQuery);
+    });
+
+    test('rejects something that is not words', () {
+      expect(
+        errorsOf(mutated((r) => r['image_query'] = 42)).join(),
+        contains('image_query'),
+      );
+    });
+  });
+
+  /// App-owned now — the model is told to leave it alone — but a pasted recipe
+  /// can still carry one, so this stays a trust boundary. Three is a cap, not a
+  /// target.
   group('image_urls', () {
     String withImages(Object? value) => mutated((r) => r['image_urls'] = value);
 

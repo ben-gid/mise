@@ -84,14 +84,26 @@ class Recipe {
   /// its properties are declared.
   final String? notes;
 
-  /// Photos of the finished dish, best first — `https` urls the LLM found, or a
-  /// single `mise://<filename>` pointing at a picked photo copied in beside the
-  /// recipes.
+  /// Two to four words for what the finished dish looks like, as typed into a
+  /// stock photo search. The model's whole half of the picture: it never emits
+  /// a url, it says what to go and find. See `pexelsPhotos` in
+  /// `recipe_image.dart` for what does the finding.
   ///
-  /// A list because a guessed url is often dead: the app shows the first that
-  /// loads and treats the rest as fallbacks. Empty is the norm, and a recipe
-  /// whose urls all fail reads as one with no photo at all. See
-  /// `recipe_image.dart` for how a url becomes a picture.
+  /// It sits after [notes] for the same reason [notes] sits after [steps] —
+  /// models emit an object in the order its properties are declared, and
+  /// describing how a dish looks wants the whole recipe already written.
+  final String? imageQuery;
+
+  /// The photo the cook settled on: one `https` url the app's search turned up,
+  /// or a single `mise://<filename>` pointing at a picture copied in beside the
+  /// recipes. **App-owned** — an LLM writes [imageQuery] and never this.
+  ///
+  /// Still a list, and still capped at three, because it is what `saveVersion`
+  /// carries forward, what the version diff reads and what the editor
+  /// round-trips — none of which a single string would have got for free. Empty
+  /// is the norm: a recipe usually wears whatever the search found, and only a
+  /// deliberate pick is written down. See `recipe_image.dart` for how a url
+  /// becomes a picture.
   @JsonKey(defaultValue: <String>[])
   final List<String> imageUrls;
   final List<String> tags;
@@ -104,6 +116,7 @@ class Recipe {
     required this.ingredients,
     required this.steps,
     this.notes,
+    this.imageQuery,
     this.imageUrls = const [],
     required this.tags,
     required this.source,

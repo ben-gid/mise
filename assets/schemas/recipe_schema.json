@@ -30,11 +30,16 @@
       "type": ["string", "null"],
       "description": "The headnote, printed above the ingredients the way a cookbook prints it \u2014 where the dish comes from, when to make it, what can be substituted, the one tip that decides whether it works. Two to four sentences of prose, not a summary of the steps. Write it last, once the whole recipe is on the page. Omit it only when there is genuinely nothing to say."
     },
+    "image_query": {
+      "type": ["string", "null"],
+      "maxLength": 60,
+      "description": "Two to four words for what the finished dish LOOKS like, written the way you would type it into a stock photo search box \u2014 the food, its form, and at most one visible quality: \"rustic focaccia bread\", \"creamy mushroom pasta\", \"chocolate layer cake slice\". Not the recipe's title, not a cuisine, not a person's or brand's name, nothing about taste, difficulty or occasion, nothing a camera cannot see. The app searches a photo library with this string, so words a photographer would use beat words a cook would."
+    },
     "image_urls": {
       "type": "array",
       "maxItems": 3,
       "items": { "type": "string", "pattern": "^(https|mise)://" },
-      "description": "Photos of the finished dish, best first \u2014 but only urls you are actually confident exist. Leave this empty rather than guessing: a reconstructed CDN path 404s, and several guesses fail together rather than covering for each other. The app falls back to a photo of the dish from Wikipedia and to the cook's own camera, so no url is a better answer than an invented one. https only \u2014 phones block cleartext http. mise:// is written by the app for a photo picked from the device; never emit it."
+      "description": "Left to the app. It holds the one photo the cook settled on, or a mise:// photo off their device. Do not emit it: a url you supply overrides the photo search and is usually a 404. Describe the dish in image_query instead. https only \u2014 phones block cleartext http."
     },
     "tags": {
       "type": "array",

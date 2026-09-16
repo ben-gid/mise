@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mise/recipe/recipe_models.dart';
+import 'package:mise/recipe/recipe_image.dart';
 import 'package:mise/recipe/recipe_parser.dart';
 import 'package:mise/recipe/recipe_store.dart';
 import 'package:mise/recipe/recipe_units.dart';
@@ -26,7 +27,12 @@ void main() {
     store = RecipeStore(dir);
   });
 
-  tearDown(() => dir.deleteSync(recursive: true));
+  tearDown(() {
+    dir.deleteSync(recursive: true);
+    // A photo search seeded by one test would otherwise surface in every
+    // recipe the tests after it open.
+    forgetPexels();
+  });
 
   /// Pumps inside [tester.runAsync] until [ready], which must describe what the
   /// screen looks like once its store read has landed.
@@ -211,18 +217,25 @@ void main() {
 
   /// Pumps the detail screen for a recipe carrying [urls], waiting inside
   /// `runAsync` until [settled] — the chain walks real network attempts, and
-  /// those need the real clock (see CLAUDE.md).
-  Future<void> pumpPhotos(
+  /// those need the real clock (see CLAUDE.md). Returns the id it was saved
+  /// under.
+  ///
+  /// [search] stands in for Pexels, query to results. It is seeded inside the
+  /// `runAsync`: a seed made in the fake-async zone never delivers to a chain
+  /// walking under the real clock.
+  Future<String> pumpPhotos(
     WidgetTester tester,
     List<String> urls,
-    bool Function() settled,
-  ) async {
+    bool Function() settled, {
+    Map<String, List<String>> search = const {},
+  }) async {
     final recipe = Recipe.fromJson({
       ...(jsonDecode(validJson) as Map<String, dynamic>),
       'image_urls': urls,
     });
     final id = (await tester.runAsync(() => store.save(recipe)))!;
     await tester.runAsync(() async {
+      search.forEach(seedPexels);
       await tester.pumpWidget(
         MaterialApp(
           home: RecipeDetailScreen(
@@ -241,7 +254,111 @@ void main() {
       );
     });
     await tester.pumpAndSettle();
+    return id;
   }
+
+  /// The one recipe file in the store, as it now reads on disk.
+  Recipe onDisk() {
+    final files = dir
+        .listSync()
+        .whereType<File>()
+        .where((f) => f.path.endsWith('.json'))
+        .toList();
+    expect(files, hasLength(1), reason: 'a photo must not mint a new file');
+    return Recipe.fromJson(
+      jsonDecode(files.single.readAsStringSync()) as Map<String, dynamic>,
+    );
+  }
+
+  /// Whether [url] has reached disk yet. Polled while the save is in flight, so
+  /// a file caught half-written reads as "not yet" rather than as a failure.
+  bool savedWith(String url) {
+    try {
+      return onDisk().imageUrls.contains(url);
+    } on FormatException {
+      return false;
+    }
+  }
+
+  testWidgets('a photo the search finds is kept, in place', (tester) async {
+    File('${dir.path}/found.png').writeAsBytesSync(base64Decode(onePixelPng));
+    final recipe = Recipe.fromJson(
+      jsonDecode(validJson) as Map<String, dynamic>,
+    );
+    final expectedId = (await tester.runAsync(() async {
+      final id = await store.save(recipe);
+      await store.setRating(id, (stars: 4, note: 'crisp'));
+      return id;
+    }))!;
+
+    final id = await pumpPhotos(
+      tester,
+      const [],
+      // Settled once the write has landed, not once the photo shows: the
+      // save is the thing under test.
+      () => savedWith('mise://found.png'),
+      search: const {
+        'rustic focaccia bread': ['mise://found.png'],
+      },
+    );
+
+    expect(id, expectedId);
+    expect(onDisk().imageUrls, ['mise://found.png']);
+    // Same id, so the rating stays attached and nothing lands in history —
+    // the two things a trip through saveVersion would have broken.
+    final (rating, history) = (await tester.runAsync(
+      () async => (await store.rating(id), await store.history(id)),
+    ))!;
+    expect(rating?.stars, 4);
+    expect(history, hasLength(1));
+  });
+
+  testWidgets('picking a photo replaces the one a recipe has, in place', (
+    tester,
+  ) async {
+    File('${dir.path}/own.png').writeAsBytesSync(base64Decode(onePixelPng));
+    File('${dir.path}/other.png').writeAsBytesSync(base64Decode(onePixelPng));
+
+    final id = await pumpPhotos(
+      tester,
+      const ['mise://own.png'],
+      () => find.text('Your photo').evaluate().isNotEmpty,
+      search: const {
+        'rustic focaccia bread': ['mise://other.png'],
+      },
+    );
+    await tester.runAsync(() => store.setRating(id, (stars: 5, note: '')));
+
+    // Tapped under the real clock: the picker awaits the search before the
+    // sheet opens, and that Future was made there.
+    await tester.runAsync(() async {
+      await tester.tap(find.byTooltip('Choose photo'));
+      await pumpUntil(
+        tester,
+        () => find.text('Choose a photo').evaluate().isNotEmpty,
+      );
+    });
+    await tester.pumpAndSettle();
+    expect(find.text('Photos from Pexels'), findsOneWidget);
+
+    await tester.tap(
+      find.descendant(of: find.byType(GridView), matching: find.byType(InkWell)),
+    );
+    await tester.pumpAndSettle();
+    await tester.runAsync(
+      () => pumpUntil(
+        tester,
+        () => savedWith('mise://other.png'),
+      ),
+    );
+
+    expect(onDisk().imageUrls, ['mise://other.png']);
+    final (rating, history) = (await tester.runAsync(
+      () async => (await store.rating(id), await store.history(id)),
+    ))!;
+    expect(rating?.stars, 5);
+    expect(history, hasLength(1));
+  });
 
   testWidgets('a dead url falls through to the next one', (tester) async {
     File('${dir.path}/photo.png').writeAsBytesSync(base64Decode(onePixelPng));

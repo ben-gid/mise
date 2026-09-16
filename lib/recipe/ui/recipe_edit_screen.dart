@@ -207,8 +207,12 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
         for (final tag in _tags.text.split(','))
           if (tag.trim().isNotEmpty) tag.trim(),
       ],
-      // Neither belongs to the user: source records where the recipe came
-      // from, and createdAt is restamped by saveVersion.
+      // None of these belong to the user: source records where the recipe came
+      // from, createdAt is restamped by saveVersion, and imageQuery is the
+      // model's description of the dish, edited from the photo picker rather
+      // than from this form. Carried rather than rebuilt — a field on Recipe
+      // that is missing here is erased by the first save, silently.
+      imageQuery: widget.recipe.imageQuery,
       source: widget.recipe.source,
       createdAt: widget.recipe.createdAt,
     );
@@ -307,11 +311,11 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
             '- Set density_g_per_ml on every ingredient that could reasonably '
             'be measured either way, keeping any already there. Omit it only '
             'for countable items and pinches.\n'
-            '- Leave image_urls alone if it already has entries: replacing a '
-            'picture that works with one you are unsure of is a loss. If it '
-            'is empty, fill it with up to three direct https links to photos '
-            'of the finished dish, best first, preferring stable public '
-            'sources such as Wikimedia Commons.\n\n'
+            '- Leave image_urls exactly as it is. It holds the photo the '
+            'cook chose and is not yours to change.\n'
+            '- Set image_query if it is missing, and fix it if it names the '
+            'recipe instead of describing it: two to four words for what the '
+            'finished dish looks like, as typed into a stock photo search.\n\n'
             'The recipe to rewrite:\n${_json.text}',
       ),
     );

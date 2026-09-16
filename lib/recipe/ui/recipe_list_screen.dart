@@ -213,6 +213,7 @@ class _RecipeRow extends StatelessWidget {
                     accent: accent,
                     urls: recipe.imageUrls,
                     title: recipe.title,
+                    query: recipe.imageQuery,
                     store: store,
                   ),
                   const SizedBox(width: 12),
@@ -280,6 +281,11 @@ class _Cover extends StatefulWidget {
 
   /// The dish, for the fallback — see [ImageChain.title].
   final String title;
+
+  /// What the dish looks like — see [ImageChain.query]. A row runs the same
+  /// search the detail screen does, off the same memo, so the two cannot
+  /// settle on different photos for one recipe.
+  final String? query;
   final RecipeStore store;
 
   const _Cover({
@@ -287,6 +293,7 @@ class _Cover extends StatefulWidget {
     required this.accent,
     required this.urls,
     required this.title,
+    required this.query,
     required this.store,
   });
 
@@ -315,7 +322,8 @@ class _CoverState extends State<_Cover> {
   void didUpdateWidget(_Cover oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (listEquals(oldWidget.urls, widget.urls) &&
-        oldWidget.title == widget.title) {
+        oldWidget.title == widget.title &&
+        oldWidget.query == widget.query) {
       return;
     }
     _start();
@@ -323,9 +331,15 @@ class _CoverState extends State<_Cover> {
 
   void _start() {
     _chain?.dispose();
-    _chain = ImageChain(widget.urls, widget.store, () {
-      if (mounted) setState(() {});
-    }, title: widget.title);
+    _chain = ImageChain(
+      widget.urls,
+      widget.store,
+      () {
+        if (mounted) setState(() {});
+      },
+      title: widget.title,
+      query: widget.query,
+    );
     _chain!.resolve(createLocalImageConfiguration(context));
   }
 

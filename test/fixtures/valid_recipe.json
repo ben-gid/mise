@@ -61,6 +61,7 @@
     }
   ],
   "notes": "A slow-proofed focaccia with a garlic butter crust. The long cold rest is what gives it the open crumb \u2014 the dough can sit overnight in the fridge instead of the 2h bulk proof, and is easier to dimple cold.",
+  "image_query": "rustic focaccia bread",
   "image_urls": [],
   "tags": ["bread", "vegetarian", "make-ahead"],
   "source": "claude-generated",
