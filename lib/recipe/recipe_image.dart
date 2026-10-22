@@ -20,12 +20,17 @@ import 'recipe_store.dart';
 /// an absolute path. See [RecipeStore.addImage] for why it can't be absolute.
 const _localScheme = 'mise://';
 
+/// The photo search proxy in `server/`, e.g. `https://mise-photos-….run.app`.
 /// Read at compile time: `flutter run --dart-define-from-file=env.json`.
 ///
-/// Empty is a supported state, not a broken one. A checkout with no key — and
-/// every run of `flutter test` — simply skips the stock photo link of the chain
-/// and falls through to Wikipedia, which is what keeps the suite offline.
-const _pexelsKey = String.fromEnvironment('PEXELS_KEY');
+/// A proxy rather than the Pexels key itself: anything compiled into the app
+/// can be read back out of the APK, and the key's quota is shared by every
+/// install. The server holds the key and caches results across all of them.
+///
+/// Empty is a supported state, not a broken one. A checkout with no proxy —
+/// and every run of `flutter test` — simply skips the stock photo link of the
+/// chain and falls through to Wikipedia, which is what keeps the suite offline.
+const _photoProxy = String.fromEnvironment('PHOTO_PROXY');
 
 /// Something to paint, or null when the recipe has no usable image.
 ///
@@ -111,36 +116,27 @@ void seedPexels(String query, List<String> urls) =>
     _pexels[query] = Future.value(urls);
 
 Future<List<String>> _fetchPexels(String query) async {
-  // No key is the normal state of a fresh checkout and of the test suite.
+  // No proxy is the normal state of a fresh checkout and of the test suite.
   // Skipping quietly beats a link in the chain that always errors.
-  if (_pexelsKey.isEmpty || query.trim().isEmpty) return const [];
-  final uri = Uri.https('api.pexels.com', '/v1/search', {
-    'query': query,
-    // One page serves both the hero and the picker's three-by-three grid.
-    'per_page': '9',
-    // A hero is a wide band and a list tile is a square; a portrait shot crops
-    // to the middle of its subject in both.
-    'orientation': 'landscape',
-  });
+  if (_photoProxy.isEmpty || query.trim().isEmpty) return const [];
+  // Page size, orientation and rendition are chosen server-side, in
+  // server/app/pexels.py. What comes back is just the urls, best first.
+  final uri = Uri.parse(
+    _photoProxy,
+  ).resolve('photos').replace(queryParameters: {'query': query});
   final client = HttpClient();
   try {
-    final request = await client.getUrl(uri);
-    // Pexels takes the bare key — no 'Bearer'.
-    request.headers.set(HttpHeaders.authorizationHeader, _pexelsKey);
-    final response = await request.close();
+    final response = await client.getUrl(uri).then((r) => r.close());
     if (response.statusCode != HttpStatus.ok) return const [];
     final body = jsonDecode(await response.transform(utf8.decoder).join());
     return [
-      for (final photo in (body['photos'] as List? ?? const []))
-        // 'large' is 940px. Not the larger rendition: the picker's tile and the
-        // hero then share one cache entry, so a photo the sheet has already
-        // shown is on disk by the time it is picked.
-        if (((photo as Map)['src'] as Map?)?['large'] case final String url)
-          url,
+      for (final url in body as List)
+        if (url is String) url,
     ];
   } catch (_) {
-    // Offline, a 429 off the free tier, malformed JSON — none of them should
-    // take a recipe screen down, so they all read as "no photos".
+    // Offline, a 502 when Pexels is down or out of quota, malformed JSON —
+    // none of them should take a recipe screen down, so they all read as
+    // "no photos".
     return const [];
   } finally {
     client.close();

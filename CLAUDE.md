@@ -13,6 +13,12 @@ dart run build_runner build               # after ANY change to recipe_models.da
 flutter run                               # a phone/tablet device or emulator — the real target
 flutter run -d linux                      # desktop, only to eyeball a change quickly
 flutter run --dart-define-from-file=env.json   # with stock photos; see env.example.json
+
+# server/ — the photo search proxy (FastAPI, uv, Cloud Run)
+cd server && uv run pytest
+cd server && uv run uvicorn app.main:app --reload   # needs PEXELS_KEY in server/.env
+gcloud run deploy mise-photos --source server --region us-central1 \
+  --allow-unauthenticated --max-instances 2 --set-secrets PEXELS_KEY=pexels-key:latest
 ```
 
 `--delete-conflicting-outputs` was removed in this build_runner version and is ignored — drop it.
@@ -161,11 +167,26 @@ only, never `http` — phones block cleartext.
 The chain is own urls → `pexelsPhotos(image_query)` → `wikipediaImage(title)` → no
 photo, as a queue of fallbacks in `ImageChain` that only shrinks — that is its whole
 termination argument. Wikipedia is demoted, not deleted: it is a photo of *this* dish,
-and the only link that works in a build with no key. `pexelsPhotos` memoises the whole
+and the only link that works in a build with no proxy. `pexelsPhotos` memoises the whole
 nine-result page per query for the run, so the hero takes the first and the picker sheet
-shows all nine off one request. The key is compile-time (`PEXELS_KEY`, from a gitignored
-`env.json`); an empty key returns no photos rather than failing, which is also what keeps
-`flutter test` offline.
+shows all nine off one request. The proxy url is compile-time (`PHOTO_PROXY`, from a
+gitignored `env.json`); an empty one returns no photos rather than failing, which is also
+what keeps `flutter test` offline.
+
+**The Pexels key never ships in the app.** Anything compiled in can be read back out of
+an APK, and one key's 200/hour is shared by every install. [server/](server/) is a
+one-route FastAPI proxy on Cloud Run: `GET /photos?query=` answers a JSON list of urls,
+best first, with the key from Secret Manager. It caches each query for a day across every
+phone, and an upstream failure is a 502 that is never cached, so a 429 does not stick as
+"no photos". It departs from the usual FastAPI layout on purpose — no `api/routes/`, no
+`crud.py`, no generated client, no database — because it is one route and one caller,
+and the Dart side parses a list of strings by hand. The url is public, so the key is
+safe but the quota is not: each caller IP gets 50 Pexels searches an hour (cache hits
+are free), and over that is a 429 the app reads as "no photos". The IP is the *last*
+`X-Forwarded-For` entry, the one Cloud Run appends — the rest is client-supplied and
+forgeable. Behind a load balancer that would need to be second-last, or every phone
+shares one bucket. The window is per instance, so `--max-instances` multiplies it; App
+Attest / Play Integrity is the upgrade if anyone ever bothers.
 
 **A picture is not a version.** The first time the detail screen's chain lands on a
 search result *that has actually loaded*, it writes that url into `image_urls` — so the
@@ -200,8 +221,8 @@ a 64px tile has nothing to collapse into — it shows through while the chain is
 looking and stays put when it comes back with nothing. The list runs the full
 chain too, in `_Cover`, query included, so a row shows the same photo the hero
 settles on. Both memos are shared across rows and with the detail screen, so a
-library costs one Pexels request per distinct query on first scroll against a
-200/hour free tier. Both chain owners restart on a changed query as well as
+library costs one proxy request per distinct query on first scroll, and the proxy's
+own cache keeps most of those off the 200/hour free tier. Both chain owners restart on a changed query as well as
 changed urls — an edit that fixes a useless query leaves every url alone. Nothing
 deletes a photo: a
 deleted recipe leaves its file behind, because the list screen's Undo re-saves
