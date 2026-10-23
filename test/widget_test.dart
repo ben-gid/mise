@@ -992,12 +992,14 @@ void main() {
     expect(await tester.runAsync(store.loadAll), hasLength(1));
   });
 
-  /// Saves a version built by [mutate] on top of the fixture, then opens the
-  /// history screen showing it.
+  /// Saves a version built by [mutate] on top of the fixture — and one more by
+  /// [andThen] on top of that, if given — then opens the history screen
+  /// showing them.
   Future<void> openHistoryAfter(
     WidgetTester tester,
-    void Function(Map<String, dynamic> json) mutate,
-  ) async {
+    void Function(Map<String, dynamic> json) mutate, {
+    void Function(Map<String, dynamic> json)? andThen,
+  }) async {
     tester.view.physicalSize = const Size(1200, 2600);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
@@ -1008,7 +1010,20 @@ void main() {
       final first = await store.save(parser.parse(validJson));
       final json = jsonDecode(validJson) as Map<String, dynamic>;
       mutate(json);
-      return store.saveVersion(parser.parse(jsonEncode(json)), parent: first);
+      final second = await store.saveVersion(
+        parser.parse(jsonEncode(json)),
+        parent: first,
+      );
+      if (andThen == null) return second;
+      // A version's id is its createdAt millisecond; two saves inside one
+      // would share it, and the second would overwrite the first.
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      final next = second.$2.toJson();
+      andThen(next);
+      return store.saveVersion(
+        parser.parse(jsonEncode(next)),
+        parent: second.$1,
+      );
     });
 
     await tester.runAsync(() async {
@@ -1038,6 +1053,43 @@ void main() {
     });
     await tester.pumpAndSettle();
   }
+
+  // The report: flour edited, then butter, and restoring the flour's card
+  // brought the butter back instead — Restore is the whole version.
+  testWidgets('undoing an earlier edit keeps the edits made since', (
+    tester,
+  ) async {
+    await openHistoryAfter(
+      tester,
+      (json) => (json['ingredients'] as List)[0]['amount'] = 490,
+      andThen: (json) => (json['ingredients'] as List)[5]['amount'] = 50,
+    );
+
+    // Newest first: the butter's card, then the flour's.
+    // Waits on the write, not the screen: the pop's transition only runs
+    // once pumpAndSettle moves the clock.
+    // Two tips is the moment between saveVersion writing the file and its
+    // parent link — not landed yet.
+    Future<int> versions() async {
+      final all = await store.loadAll();
+      return all.length == 1 ? (await store.history(all.single.$1)).length : 0;
+    }
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Undo these changes').at(1));
+      for (var i = 0; i < 100 && await versions() < 4; i++) {
+        await tester.pump();
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+    });
+    await tester.pumpAndSettle();
+    expect(find.text('Original'), findsNothing, reason: 'history closes');
+
+    final (id, tip) = (await tester.runAsync(store.loadAll))!.single;
+    expect(tip.ingredientById('0001')!.amount, 500);
+    expect(tip.ingredientById('0006')!.amount, 50);
+    // A new version on top, so the undo is on the record too.
+    expect(await tester.runAsync(() => store.history(id)), hasLength(4));
+  });
 
   testWidgets('history keeps green and red for what arrived or left', (
     tester,
@@ -1092,6 +1144,23 @@ void main() {
   /// The detail screen's cook log rows — distinct from the entry dialog, whose
   /// note field holds the same text while it closes.
   final logRows = find.byType(CookEntryLine);
+
+  // 360dp is a common small Android width. At the dialog's default 40px
+  // inset, five 48px stars and the servings stepper both ran out of room.
+  testWidgets('the I made it dialog fits a narrow phone', (tester) async {
+    tester.view.physicalSize = const Size(360, 2000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await pumpDetail(tester);
+
+    await tester.tap(find.text('I made it'));
+    await tester.pumpAndSettle();
+
+    // An overflow is reported as an exception, which fails the test by itself;
+    // this says what was being checked.
+    expect(tester.takeException(), isNull);
+    expect(find.byType(AlertDialog), findsOneWidget);
+  });
 
   testWidgets('a cook logged with I made it survives reopening the recipe', (
     tester,

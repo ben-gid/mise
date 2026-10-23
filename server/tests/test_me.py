@@ -1,3 +1,4 @@
+import json
 import time
 from types import SimpleNamespace
 
@@ -64,6 +65,32 @@ def admin(monkeypatch):
     return fake
 
 
+@pytest.fixture
+def storage(monkeypatch):
+    """Stands in for Supabase Storage: `photos` are listed once, then the folder
+    reads empty; `status` fails every call."""
+    fake = SimpleNamespace(requests=[], photos=["1.jpg", "2.png"], status=200)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        fake.requests.append(request)
+        if fake.status != 200:
+            return httpx.Response(fake.status, json={})
+        if request.url.path.endswith("/object/list/photos"):
+            listed, fake.photos = fake.photos, []
+            return httpx.Response(200, json=[{"name": n} for n in listed])
+        return httpx.Response(200, json=[])
+
+    monkeypatch.setattr(
+        auth,
+        "_storage",
+        httpx.AsyncClient(
+            base_url=f"{settings.SUPABASE_URL}/storage/v1",
+            transport=httpx.MockTransport(handler),
+        ),
+    )
+    return fake
+
+
 def test_a_valid_token_names_its_user():
     response = client.get("/me", headers=bearer(token()))
     assert response.status_code == 200
@@ -92,7 +119,7 @@ def test_anything_but_a_valid_token_is_401(headers):
     assert client.get("/me", headers=headers).status_code == 401
 
 
-def test_deleting_the_account_deletes_that_user_with_the_secret_key(admin):
+def test_deleting_the_account_deletes_that_user_with_the_secret_key(admin, storage):
     response = client.delete("/me", headers=bearer(token()))
     assert response.status_code == 204
     request = admin.requests[0]
@@ -106,7 +133,23 @@ def test_deleting_needs_a_valid_token(admin):
     assert admin.requests == []
 
 
-def test_an_admin_api_failure_is_a_502(admin):
+def test_deleting_the_account_empties_its_photo_folder_first(admin, storage):
+    assert client.delete("/me", headers=bearer(token())).status_code == 204
+    removed = [r for r in storage.requests if r.method == "DELETE"]
+    assert len(removed) == 1
+    assert json.loads(removed[0].content) == {"prefixes": ["user-1/1.jpg", "user-1/2.png"]}
+    assert json.loads(storage.requests[0].content)["prefix"] == "user-1"
+    assert removed[0].headers["apikey"] == settings.SUPABASE_SECRET_KEY.get_secret_value()
+    assert len(admin.requests) == 1
+
+
+def test_a_storage_failure_keeps_the_account(admin, storage):
+    storage.status = 500
+    assert client.delete("/me", headers=bearer(token())).status_code == 502
+    assert admin.requests == []
+
+
+def test_an_admin_api_failure_is_a_502(admin, storage):
     admin.status = 500
     assert client.delete("/me", headers=bearer(token())).status_code == 502
 

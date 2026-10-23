@@ -286,6 +286,65 @@ project's public JWKS (ES256), audience `authenticated`, issuer
 in `apikey` and never in `Authorization`, and bypasses every RLS policy — it stays in
 Secret Manager. Schema changes go in `supabase/migrations/` *and* to the project.
 
+**Sync compares against what was last synced; nothing marks a row dirty.**
+[lib/recipe/recipe_sync.dart](lib/recipe/recipe_sync.dart) flattens the library through
+`RecipeStore.rows()` (`v/<id>` → `{recipe, parent}`, `e/<version>/<entry>`, `units`),
+pulls every remote row changed since a per-table cursor, and hands both to `merge` with
+the fingerprints `sync.meta` recorded last time. Touched only on the other phone: apply
+it. Touched here: upload it, whatever the other phone did — the files are the source of
+truth. That one rule is the whole feature list: an empty record is "first link uploads
+the library", a synced row now missing is a tombstone, and Undo's re-save differs from
+the tombstone so it uploads again. A different user id in `sync.meta` (a phone switched
+accounts) empties the record, which merges this library into that account. Fingerprints
+hash JSON with sorted keys because jsonb reorders them; without that every upload came
+back looking edited. Linked users only, enforced by RLS as well as the app. Rows are
+never deleted, only given `deleted_at`, and there is no delete policy.
+
+The store calls `onWrite` once at the end of every write a person makes, and
+`applyRows` (sync writing what it pulled) never does, or each pull would echo.
+`saveVersion` saves through `_save` so sync can't read a version before its parent link
+exists. Pulled recipes go through `RecipeParser.parse` like any other untrusted JSON, and
+`applyRows` files a recipe under `_idFor` its own content, never the key it arrived with:
+an id is a filename.
+
+**Two phones editing one version is a fork, resolved at read time.** Both edits name the
+same parent, so both would list as the recipe. `_linear` groups every version by its root
+and chains each group by `createdAt`, so the older edit sits in the newer one's history.
+That order comes out the same on every phone, so nothing is written back. `loadAll`,
+`history` and `delete` read these effective parents. `history.meta` and the synced
+`parent_id` keep the recorded ones. `forked()` is where the two differ, and the history
+screen labels those versions "Edited on another device", because their diff is against
+the other phone's edit. For a plain chain `_linear` is the identity, because a child is
+always newer than its parent.
+
+Live sync is Realtime used as a trigger only. `_listen` subscribes to this account's
+rows in the three tables, and every event just calls `syncNow`; nothing is applied from
+the event's payload. So there is still one merge, and an event that is duplicated,
+late or lost costs nothing the next run doesn't fix. Realtime drops events while the
+app is backgrounded, which is why the run on resume stays. A phone's own uploads come
+back as events too, each answered by one run that finds nothing to do.
+
+Anything a run writes bumps `pulled`: the list screen reloads, and an open detail screen
+moves onto `store.newest(_id)`, the way an edit made here would, then reloads its cook
+log. Without that, an edit on the other phone (a new version under a new id) would leave
+the open screen on a superseded version.
+
+**History has two ways back, because a card shows a change and a version is a whole
+recipe.** "Restore this version" brings back that snapshot and so undoes every edit made
+*since* it. Labelled just "Restore" beside a diff, it read as undoing the listed change,
+and restoring a fettuccine edit brought back the butter that came after it.
+"Undo these changes" is `undoChanges` in `recipe_diff.dart`: each field, ingredient and
+step that version changed goes back to its parent's value, matched by id like the diff,
+unless something edited it again since. The result can be a combination no version
+ever was, so it goes through the validator; Restore doesn't need to. Pull-to-refresh on the list calls `syncNow`, which joins a run already
+going rather than starting a second one, and finishes when that run does, so the spinner
+covers the run the person asked for.
+
+`mise://` photos go to the private `photos` bucket under `<uid>/`. Every run uploads each
+referenced photo the account lacks and downloads each one the phone lacks, so a failed
+download is retried by the next run. Storage objects don't cascade from `auth.users`, so
+`DELETE /me` empties the folder before it deletes the user.
+
 **No state management package and none wanted** — three screens over one store, plain
 `StatefulWidget` + `setState`, `Navigator.push` between them. The store and parser are
 constructed once in `main()` and passed down by constructor.

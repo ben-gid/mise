@@ -151,7 +151,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ListTile(
         leading: const Icon(Icons.account_circle_outlined),
         title: Text(email),
-        subtitle: const Text('Signed in'),
+        subtitle: const Text('Signed in · recipes sync'),
       ),
       ListTile(
         leading: const Icon(Icons.logout),

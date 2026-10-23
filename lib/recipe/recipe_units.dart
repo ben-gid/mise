@@ -21,6 +21,25 @@ enum MeasureBy { asWritten, weight, volume }
 
 final measureBy = ValueNotifier(MeasureBy.asWritten);
 
+/// Sets the three notifiers from a `units.meta` line, as `main()` reads it at
+/// launch and sync does when another phone changed it. Anything unreadable
+/// reads as the default rather than throwing.
+void applyUnitSystems(String? saved) {
+  final units = saved?.split(',') ?? const <String>[];
+  UnitSystem savedUnit(int index) => UnitSystem.values.firstWhere(
+    (system) => index < units.length && system.name == units[index],
+    orElse: () => UnitSystem.metric,
+  );
+  weightSystem.value = savedUnit(0);
+  volumeSystem.value = savedUnit(1);
+  // Appended third, so a sidecar written before this existed still reads —
+  // savedUnit's own bounds check is what makes that free.
+  measureBy.value = MeasureBy.values.firstWhere(
+    (by) => units.length > 2 && by.name == units[2],
+    orElse: () => MeasureBy.asWritten,
+  );
+}
+
 /// `1.0` -> "1", `166.666` -> "166.67".
 String formatAmount(num amount) {
   final rounded = (amount * 100).round() / 100;

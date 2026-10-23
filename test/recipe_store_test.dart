@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mise/recipe/recipe_models.dart';
 import 'package:mise/recipe/recipe_parser.dart';
 import 'package:mise/recipe/recipe_store.dart';
 
@@ -390,5 +391,156 @@ void main() {
     expect(loaded.single.$2.title, 'Garlic Butter Focaccia');
     // Skipped, never deleted — still there to recover by hand.
     expect(File('${dir.path}/broken.json').existsSync(), isTrue);
+  });
+
+  // Two directories standing in for two phones, with rows carried between
+  // them by hand the way sync carries them.
+  group('two phones', () {
+    late Directory otherDir;
+    late RecipeStore other;
+
+    setUp(() {
+      otherDir = Directory.systemTemp.createTempSync('recipe_store_other');
+      other = RecipeStore(otherDir);
+    });
+
+    tearDown(() => otherDir.deleteSync(recursive: true));
+
+    Recipe retitled(Recipe recipe, String title) =>
+        Recipe.fromJson({...recipe.toJson(), 'title': title});
+
+    Future<void> carry(RecipeStore from, RecipeStore to, String key) async =>
+        to.applyRows({key: (await from.rows())[key]});
+
+    test('one applying the other\'s rows ends up with the same rows', () async {
+      final original = parser.parse(validJson);
+      final a = await store.save(original);
+      final b = await store.saveVersion(
+        retitled(original, 'Edited'),
+        parent: a,
+      );
+      await store.saveEntry(b.$1, (
+        id: '1',
+        date: DateTime(2026, 10, 20),
+        servings: 4,
+        stars: 5,
+        note: 'More salt',
+      ));
+      await store.setUnitSystems('imperial,metric,weight');
+
+      await other.applyRows(await store.rows());
+
+      expect(await other.rows(), await store.rows());
+      expect((await other.loadAll()).single.$1, b.$1);
+      expect(await other.unitSystems(), 'imperial,metric,weight');
+    });
+
+    test('a pulled deletion removes one version, not its chain', () async {
+      final original = parser.parse(validJson);
+      final a = await store.save(original);
+      final b = await store.saveVersion(
+        retitled(original, 'Edited'),
+        parent: a,
+      );
+
+      await store.applyRows({'v/${b.$1}': null});
+
+      expect((await store.loadAll()).single.$1, a);
+    });
+
+    test('both editing the same version: one recipe, the older edit in its '
+        'history', () async {
+      final original = parser.parse(validJson);
+      final a = await store.save(original);
+      await carry(store, other, 'v/$a');
+
+      final here = await store.saveVersion(
+        retitled(original, 'Here'),
+        parent: a,
+      );
+      // Distinct milliseconds, so which edit is older isn't a tie.
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      final there = await other.saveVersion(
+        retitled(original, 'There'),
+        parent: a,
+      );
+      await carry(other, store, 'v/${there.$1}');
+      await carry(store, other, 'v/${here.$1}');
+
+      for (final phone in [store, other]) {
+        expect((await phone.loadAll()).map((s) => s.$1), [there.$1]);
+        expect((await phone.history(there.$1)).map((s) => s.$1), [
+          there.$1,
+          here.$1,
+          a,
+        ]);
+        expect(await phone.forked(), {there.$1});
+      }
+    });
+
+    test('deleting a forked recipe deletes both edits', () async {
+      final original = parser.parse(validJson);
+      final a = await store.save(original);
+      await store.saveVersion(retitled(original, 'Here'), parent: a);
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      await carry(store, other, 'v/$a');
+      final there = await other.saveVersion(
+        retitled(original, 'There'),
+        parent: a,
+      );
+      await carry(other, store, 'v/${there.$1}');
+
+      await store.delete(there.$1);
+
+      expect(await store.loadAll(), isEmpty);
+      expect(
+        (await store.rows()).keys.where((k) => k.startsWith('v/')),
+        isEmpty,
+      );
+    });
+
+    test('newest follows a version on to what arrived after it', () async {
+      final original = parser.parse(validJson);
+      final a = await store.save(original);
+      await carry(store, other, 'v/$a');
+      final b = await other.saveVersion(retitled(original, 'There'), parent: a);
+
+      expect((await store.newest(a))!.$1, a);
+      await carry(other, store, 'v/${b.$1}');
+      expect((await store.newest(a))!.$1, b.$1);
+      expect((await store.newest(b.$1))!.$1, b.$1);
+    });
+
+    test(
+      'a pulled recipe is filed under its own id, never the one it names',
+      () async {
+        await store.save(parser.parse(validJson));
+        final row = (await store.rows()).values.first;
+
+        await other.applyRows({'v/../escaped': row});
+
+        expect(await other.loadAll(), isEmpty);
+        expect(
+          File('${otherDir.parent.path}/escaped.json').existsSync(),
+          isFalse,
+        );
+      },
+    );
+
+    test(
+      'a person\'s writes notify sync once each; sync\'s own do not',
+      () async {
+        var writes = 0;
+        store.onWrite = () => writes++;
+        final original = parser.parse(validJson);
+
+        final a = await store.save(original);
+        await store.saveVersion(retitled(original, 'Edited'), parent: a);
+        expect(writes, 2);
+
+        await store.applyRows(await store.rows());
+        expect(writes, 2);
+      },
+    );
   });
 }

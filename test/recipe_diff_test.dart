@@ -310,4 +310,66 @@ void main() {
       ]);
     },
   );
+
+  group('undoing one version', () {
+    num amount(Map<String, dynamic> json, String id) =>
+        (json['ingredients'] as List).firstWhere((i) => i['id'] == id)['amount']
+            as num;
+
+    Map<String, dynamic> withAmounts(Recipe from, Map<String, num> amounts) {
+      final json = from.toJson();
+      for (final i in json['ingredients'] as List) {
+        if (amounts[i['id']] case final value?) i['amount'] = value;
+      }
+      return json;
+    }
+
+    // The report that found this: flour edited, then butter, then "undo the
+    // flour" brought the butter back instead.
+    test('takes back only its own change, keeping a later edit', () {
+      final v1 = original();
+      final v2 = Recipe.fromJson(withAmounts(v1, {'0001': 490}));
+      final v3 = Recipe.fromJson(withAmounts(v2, {'0006': 50}));
+
+      final undone = undoChanges(parent: v1, version: v2, current: v3);
+
+      expect(amount(undone, '0001'), 500);
+      expect(amount(undone, '0006'), 50);
+    });
+
+    test('leaves alone what was changed again since', () {
+      final v1 = original();
+      final v2 = Recipe.fromJson(withAmounts(v1, {'0001': 490}));
+      final v3 = Recipe.fromJson(withAmounts(v2, {'0001': 480}));
+
+      final undone = undoChanges(parent: v1, version: v2, current: v3);
+
+      expect(amount(undone, '0001'), 480);
+    });
+
+    test('removes what it added and brings back what it removed', () {
+      final v1 = original();
+      final v2 = edited((json) {
+        final ingredients = json['ingredients'] as List;
+        ingredients.removeWhere((i) => i['id'] == '0007');
+        ingredients.add({'id': '0008', 'name': 'rosemary', 'amount': 2});
+      });
+
+      final undone = undoChanges(parent: v1, version: v2, current: v2);
+      final ids = [for (final i in undone['ingredients'] as List) i['id']];
+
+      expect(ids, ['0001', '0002', '0003', '0004', '0005', '0006', '0007']);
+    });
+
+    test('puts back a scalar field it changed', () {
+      final v1 = original();
+      final v2 = edited((json) => json['title'] = 'Focaccia');
+      final v3 = Recipe.fromJson({...v2.toJson(), 'base_servings': 8});
+
+      final undone = undoChanges(parent: v1, version: v2, current: v3);
+
+      expect(undone['title'], 'Garlic Butter Focaccia');
+      expect(undone['base_servings'], 8);
+    });
+  });
 }

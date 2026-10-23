@@ -17,6 +17,9 @@ _issuer = f"{settings.SUPABASE_URL}/auth/v1"
 _keys = jwt.PyJWKClient(f"{_issuer}/.well-known/jwks.json", cache_keys=True)
 
 _admin = httpx.AsyncClient(base_url=f"{_issuer}/admin", timeout=10)
+_storage = httpx.AsyncClient(
+    base_url=f"{settings.SUPABASE_URL}/storage/v1", timeout=10
+)
 
 
 class AdminError(Exception):
@@ -51,13 +54,35 @@ def current_user(
         raise HTTPException(status_code=401, detail="Invalid sign-in")
 
 
-async def delete_user(user_id: str) -> None:
-    """Deletes the user outright. Their profile row goes with them by cascade."""
+def _secret() -> dict:
     # The secret key in `apikey` only: it is not a JWT, so it doesn't go in
     # Authorization.
-    response = await _admin.delete(
-        f"/users/{user_id}",
-        headers={"apikey": settings.SUPABASE_SECRET_KEY.get_secret_value()},
-    )
+    return {"apikey": settings.SUPABASE_SECRET_KEY.get_secret_value()}
+
+
+async def delete_user(user_id: str) -> None:
+    """Deletes the user outright, photos first.
+
+    Their profile and synced rows go with the user by cascade; storage objects
+    don't, so the photos folder is emptied before — a failure there keeps the
+    account rather than orphaning its photos.
+    """
+    while True:
+        listed = await _storage.post(
+            "/object/list/photos",
+            headers=_secret(),
+            json={"prefix": user_id, "limit": 1000, "offset": 0},
+        )
+        if listed.is_error:
+            raise AdminError(f"storage list {listed.status_code}")
+        names = [f"{user_id}/{item['name']}" for item in listed.json()]
+        if not names:
+            break
+        removed = await _storage.request(
+            "DELETE", "/object/photos", headers=_secret(), json={"prefixes": names}
+        )
+        if removed.is_error:
+            raise AdminError(f"storage delete {removed.status_code}")
+    response = await _admin.delete(f"/users/{user_id}", headers=_secret())
     if response.is_error:
         raise AdminError(f"admin API {response.status_code}")

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'recipe/recipe_account.dart';
 import 'recipe/recipe_parser.dart';
 import 'recipe/recipe_store.dart';
+import 'recipe/recipe_sync.dart';
 import 'recipe/recipe_units.dart';
 import 'recipe/ui/glass.dart';
 import 'recipe/ui/recipe_list_screen.dart';
@@ -20,19 +21,9 @@ Future<void> main() async {
     orElse: () => ThemeMode.system,
   );
   // Same fallback rule as the theme: anything unreadable reads as metric.
-  final units = (await store.unitSystems())?.split(',') ?? const <String>[];
-  UnitSystem savedUnit(int index) => UnitSystem.values.firstWhere(
-    (system) => index < units.length && system.name == units[index],
-    orElse: () => UnitSystem.metric,
-  );
-  weightSystem.value = savedUnit(0);
-  volumeSystem.value = savedUnit(1);
-  // Appended third, so a sidecar written before this existed still reads —
-  // savedUnit's own bounds check is what makes that free.
-  measureBy.value = MeasureBy.values.firstWhere(
-    (by) => units.length > 2 && by.name == units[2],
-    orElse: () => MeasureBy.asWritten,
-  );
+  applyUnitSystems(await store.unitSystems());
+  // Before startAccount, so it hears the first account it settles on.
+  startSync(store, parser);
   // Not awaited: the account is for sync and server routes, never for opening
   // the app, and offline it can take a while to settle.
   unawaited(startAccount());

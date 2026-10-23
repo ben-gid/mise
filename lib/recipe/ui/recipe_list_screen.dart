@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../recipe_image.dart';
 import '../recipe_parser.dart';
 import '../recipe_store.dart';
+import '../recipe_sync.dart';
 import 'glass.dart';
 import 'import_recipe_screen.dart';
 import 'recipe_detail_screen.dart';
@@ -25,6 +26,19 @@ class RecipeListScreen extends StatefulWidget {
 
 class _RecipeListScreenState extends State<RecipeListScreen> {
   late Future<List<SavedRecipe>> _recipes = widget.store.loadAll();
+
+  // Another phone's recipes, landed by sync.
+  @override
+  void initState() {
+    super.initState();
+    pulled.addListener(_reload);
+  }
+
+  @override
+  void dispose() {
+    pulled.removeListener(_reload);
+    super.dispose();
+  }
 
   // Block body, not an arrow: an arrow returns the assigned Future, and
   // setState asserts on a callback that returns one.
@@ -116,33 +130,41 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
           final recipes = snapshot.data!;
           if (recipes.isEmpty) return _EmptyState(appBarInset: appBarInset);
           final colors = Theme.of(context).colorScheme;
-          return ListView.builder(
-            // Rows run edge to edge, so the only padding is vertical: clear the
-            // blurred app bar the body scrolls under, and the FAB at the bottom.
-            padding: EdgeInsets.only(top: appBarInset, bottom: 88),
-            itemCount: recipes.length,
-            itemBuilder: (context, index) {
-              final saved = recipes[index];
-              return Dismissible(
-                key: ValueKey(saved.$1),
-                direction: DismissDirection.endToStart,
-                background: Container(
-                  alignment: Alignment.centerRight,
-                  padding: const EdgeInsets.only(right: 24),
-                  color: colors.error.withValues(alpha: 0.22),
-                  child: Icon(Icons.delete_outline, color: colors.error),
-                ),
-                onDismissed: (_) => _delete(saved),
-                child: _RecipeRow(
-                  saved: saved,
-                  store: widget.store,
-                  parser: widget.parser,
-                  onReturn: _reload,
-                  // The sheet's own bottom edge closes the last row.
-                  ruled: index < recipes.length - 1,
-                ),
-              );
-            },
+          // Sync already runs on launch, resume and every save; this is for
+          // the cook standing at a second phone who doesn't want to wait.
+          return RefreshIndicator(
+            onRefresh: syncNow,
+            edgeOffset: appBarInset,
+            child: ListView.builder(
+              // A short list still has to pull.
+              physics: const AlwaysScrollableScrollPhysics(),
+              // Rows run edge to edge, so the only padding is vertical: clear the
+              // blurred app bar the body scrolls under, and the FAB at the bottom.
+              padding: EdgeInsets.only(top: appBarInset, bottom: 88),
+              itemCount: recipes.length,
+              itemBuilder: (context, index) {
+                final saved = recipes[index];
+                return Dismissible(
+                  key: ValueKey(saved.$1),
+                  direction: DismissDirection.endToStart,
+                  background: Container(
+                    alignment: Alignment.centerRight,
+                    padding: const EdgeInsets.only(right: 24),
+                    color: colors.error.withValues(alpha: 0.22),
+                    child: Icon(Icons.delete_outline, color: colors.error),
+                  ),
+                  onDismissed: (_) => _delete(saved),
+                  child: _RecipeRow(
+                    saved: saved,
+                    store: widget.store,
+                    parser: widget.parser,
+                    onReturn: _reload,
+                    // The sheet's own bottom edge closes the last row.
+                    ruled: index < recipes.length - 1,
+                  ),
+                );
+              },
+            ),
           );
         },
       ),

@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:math' show min;
+
 import 'recipe_models.dart';
 import 'recipe_refs.dart';
 import 'recipe_scaling.dart';
@@ -255,3 +258,66 @@ bool _sameOrder(Iterable<String> a, Iterable<String> b) =>
 /// An emptied-out field reads as removed rather than as a change to "".
 String? _blankToNull(String? value) =>
     value == null || value.isEmpty ? null : value;
+
+/// [current] with [version]'s own edits taken back out, as recipe JSON for the
+/// validator: every field, ingredient and step [version] changed from
+/// [parent] goes back to how [parent] had it.
+///
+/// What the history screen's "Undo these changes" saves, as against Restore,
+/// which brings back the whole of [version] and with it undoes every edit made
+/// *since*. Something edited again after [version] is left as it is now — the
+/// later edit is the one the cook meant last.
+///
+/// Matched by id like [diffRecipes], so the result can be a combination no
+/// version ever had — a step may still name an ingredient this removes. That
+/// is why it comes back as JSON for the validator, not as a [Recipe].
+Map<String, dynamic> undoChanges({
+  required Recipe parent,
+  required Recipe version,
+  required Recipe current,
+}) {
+  final before = parent.toJson(), after = version.toJson();
+  final undone = current.toJson();
+  for (final key in before.keys) {
+    // createdAt is restamped by saveVersion; the two lists go by id below.
+    if (const {'created_at', 'ingredients', 'steps'}.contains(key)) continue;
+    if (!_same(before[key], after[key]) && _same(undone[key], after[key])) {
+      undone[key] = before[key];
+    }
+  }
+  for (final key in ['ingredients', 'steps']) {
+    undone[key] = _undoById(
+      before[key] as List,
+      after[key] as List,
+      undone[key] as List,
+    );
+  }
+  return undone;
+}
+
+/// [undoChanges] for a list matched by id. Something [after] removed goes back
+/// in at the place [before] had it, as near as the list now allows.
+List<dynamic> _undoById(List before, List after, List current) {
+  Map<Object?, dynamic> byId(List items) => {
+    for (final item in items) (item as Map)['id']: item,
+  };
+  final was = byId(before), became = byId(after);
+  final undone = [...current];
+  for (final id in {...was.keys, ...became.keys}) {
+    if (_same(was[id], became[id])) continue;
+    final at = undone.indexWhere((item) => (item as Map)['id'] == id);
+    if (!_same(at == -1 ? null : undone[at], became[id])) continue;
+    if (was[id] == null) {
+      undone.removeAt(at);
+    } else if (at == -1) {
+      undone.insert(min(before.indexOf(was[id]), undone.length), was[id]);
+    } else {
+      undone[at] = was[id];
+    }
+  }
+  return undone;
+}
+
+/// Deep equality for toJson output, whose key order is fixed by the generated
+/// code — so the encoded strings compare.
+bool _same(Object? a, Object? b) => jsonEncode(a) == jsonEncode(b);

@@ -36,6 +36,10 @@ int headlineStars(List<CookEntry> entries) =>
 class RecipeStore {
   final Directory dir;
 
+  /// Called once after every write a person made — never after [applyRows],
+  /// which is sync writing what it pulled. Set by `startSync`; null otherwise.
+  void Function()? onWrite;
+
   RecipeStore(this.dir);
 
   static Future<RecipeStore> open() async {
@@ -48,6 +52,14 @@ class RecipeStore {
   File _file(String id) => File('${dir.path}/$id.json');
 
   Future<String> save(Recipe recipe) async {
+    final id = await _save(recipe);
+    onWrite?.call();
+    return id;
+  }
+
+  /// [save] without the [onWrite], for [saveVersion]: sync must not read a
+  /// version before its parent link is written.
+  Future<String> _save(Recipe recipe) async {
     final id = _idFor(recipe);
     await _file(id).writeAsString(jsonEncode(recipe.toJson()));
     return id;
@@ -61,23 +73,25 @@ class RecipeStore {
   /// and a stale entry costs a few bytes.
   // ponytail: Undo restores the recipe, not its lineage. Tombstone the chain if
   // that bites.
+  ///
+  /// Walks [_linear]'s parents, so a recipe two phones forked goes whole.
   Future<void> delete(String id) async {
-    final parents = await _history();
+    final recorded = await _history();
+    final parents = _linear(recorded);
     // `seen` only matters if the sidecar has been corrupted into a cycle;
     // saveVersion can't create one. Cheaper than a hung delete.
     final seen = <String>{};
     var unlinked = false;
-    for (var current = id; seen.add(current);) {
+    for (String? current = id; current != null && seen.add(current);) {
       final file = _file(current);
       if (file.existsSync()) await file.delete();
-      final parent = parents.remove(current);
-      if (parent is! String) break;
-      unlinked = true;
-      current = parent;
+      unlinked |= recorded.remove(current) != null;
+      current = parents[current];
     }
     // Deleting something with no history stays a no-op rather than writing a
     // sidecar that has nothing to say.
-    if (unlinked) await _historyFile.writeAsString(jsonEncode(parents));
+    if (unlinked) await _historyFile.writeAsString(jsonEncode(recorded));
+    onWrite?.call();
   }
 
   /// Which version each version was edited from, as `{childId: parentId}`.
@@ -98,6 +112,71 @@ class RecipeStore {
     }
   }
 
+  /// The parents [loadAll], [history] and [delete] go by, as opposed to the
+  /// ones [_history] recorded.
+  ///
+  /// Two phones that each edited the same version leave two children naming
+  /// it, and both would list as the recipe. Chaining every version of a
+  /// recipe by when it was made puts the older edit into the newer one's
+  /// history instead — the same order on every phone, so nothing needs
+  /// syncing back. A plain chain comes back unchanged, because a child is
+  /// always newer than its parent.
+  Map<String, String> _linear(Map<String, dynamic> recorded) {
+    String rootOf(String id) {
+      // `seen` for the same corrupted-into-a-cycle sidecar [delete] guards.
+      final seen = {id};
+      var current = id;
+      while (true) {
+        final parent = recorded[current];
+        if (parent is! String || !seen.add(parent)) return current;
+        current = parent;
+      }
+    }
+
+    final recipes = <String, List<String>>{};
+    for (final id in {
+      ...recorded.keys,
+      ...recorded.values.whereType<String>(),
+    }) {
+      (recipes[rootOf(id)] ??= []).add(id);
+    }
+    return {
+      for (final versions in recipes.values)
+        for (final (i, id) in (versions..sort(_byAge)).indexed.skip(1))
+          id: versions[i - 1],
+    };
+  }
+
+  /// The newest version of the recipe [id] belongs to — [id] itself unless a
+  /// later one has arrived, which with sync can happen while it's on screen.
+  Future<SavedRecipe?> newest(String id) async {
+    final children = {
+      for (final MapEntry(key: child, value: parent) in _linear(
+        await _history(),
+      ).entries)
+        parent: child,
+    };
+    final seen = {id};
+    var tip = id;
+    for (var child = children[tip]; child != null && seen.add(child);) {
+      tip = child;
+      child = children[tip];
+    }
+    final recipe = await _read(_file(tip));
+    return recipe == null ? null : (tip, recipe);
+  }
+
+  /// Versions whose place in the chain is not the version they were edited
+  /// from — the newer half of a fork. Their diff is against the other phone's
+  /// edit, which the history screen says.
+  Future<Set<String>> forked() async {
+    final recorded = await _history();
+    return {
+      for (final MapEntry(key: id, value: parent) in _linear(recorded).entries)
+        if (recorded[id] != parent) id,
+    };
+  }
+
   /// Saves [recipe] as a new version of [parent], returning it under its new id.
   ///
   /// `createdAt` is stamped to now, which is what makes the id new — [_idFor]
@@ -112,24 +191,24 @@ class RecipeStore {
       ...recipe.toJson(),
       'created_at': DateTime.now().toIso8601String(),
     });
-    final id = await save(versioned);
+    final id = await _save(versioned);
     final parents = await _history()
       ..[id] = parent;
     await _historyFile.writeAsString(jsonEncode(parents));
+    onWrite?.call();
     return (id, versioned);
   }
 
   /// [id] first, then each version it was edited from, oldest last. A recipe
   /// that was never edited returns just itself.
   Future<List<SavedRecipe>> history(String id) async {
-    final parents = await _history();
+    final parents = _linear(await _history());
     final chain = <SavedRecipe>[];
     final seen = <String>{};
     for (String? current = id; current != null && seen.add(current);) {
       final recipe = await _read(_file(current));
       if (recipe != null) chain.add((current, recipe));
-      final parent = parents[current];
-      current = parent is String ? parent : null;
+      current = parents[current];
     }
     return chain;
   }
@@ -148,16 +227,14 @@ class RecipeStore {
       return {
         for (final MapEntry(key: id, value: value) in raw.entries)
           id: switch (value) {
-            List() => [for (final e in value) _decodeEntry(e as Map)],
+            List() => [for (final e in value) decodeEntry(e as Map)],
             // A version's single rating from before the log. Dated from the
             // version itself — its id starts with its createdAt — since when
             // it was cooked was never recorded.
             Map() => [
               (
                 id: 'legacy',
-                date: DateTime.fromMillisecondsSinceEpoch(
-                  int.tryParse(id.split('-').first) ?? 0,
-                ),
+                date: DateTime.fromMillisecondsSinceEpoch(_millis(id)),
                 servings: null,
                 stars: value['stars'] as int,
                 note: value['note'] as String,
@@ -177,18 +254,7 @@ class RecipeStore {
       _logFile.writeAsString(
         jsonEncode({
           for (final MapEntry(key: id, value: entries) in log.entries)
-            id: [
-              for (final e in entries)
-                {
-                  'id': e.id,
-                  // UTC on disk, so a cook keeps its moment when the phone
-                  // changes timezone — or, once logs sync, changes phone.
-                  'date': e.date.toUtc().toIso8601String(),
-                  'servings': e.servings,
-                  'stars': e.stars,
-                  'note': e.note,
-                },
-            ],
+            id: [for (final e in entries) encodeEntry(e)],
         }),
       );
 
@@ -205,6 +271,7 @@ class RecipeStore {
       entry,
     ];
     await _writeLog(log);
+    onWrite?.call();
   }
 
   /// Removes one entry. A version whose last entry goes loses its key rather
@@ -221,6 +288,7 @@ class RecipeStore {
       log[id] = remaining;
     }
     await _writeLog(log);
+    onWrite?.call();
   }
 
   /// Copies a picked photo in beside the recipes, returning the url to store
@@ -266,7 +334,96 @@ class RecipeStore {
   Future<String?> unitSystems() async =>
       _unitsFile.existsSync() ? _unitsFile.readAsString() : null;
 
-  Future<void> setUnitSystems(String names) => _unitsFile.writeAsString(names);
+  Future<void> setUnitSystems(String names) async {
+    await _unitsFile.writeAsString(names);
+    onWrite?.call();
+  }
+
+  /// Everything sync carries, flattened to one value per key:
+  /// `v/<id>` → `{recipe, parent}` with the *recorded* parent, `e/<version>/<entry>`
+  /// → a cook entry, `units` → the [setUnitSystems] line. A key that isn't
+  /// here is a deletion. Photos are files, not rows; sync handles them apart.
+  Future<Map<String, Object?>> rows() async {
+    final parents = await _history();
+    final rows = <String, Object?>{};
+    for (final MapEntry(key: id, value: file) in _files().entries) {
+      final recipe = await _read(file);
+      if (recipe == null) continue;
+      rows['v/$id'] = {'recipe': recipe.toJson(), 'parent': parents[id]};
+    }
+    for (final MapEntry(key: version, value: entries)
+        in (await _log()).entries) {
+      for (final e in entries) {
+        rows['e/$version/${e.id}'] = encodeEntry(e);
+      }
+    }
+    final units = await unitSystems();
+    if (units != null) rows['units'] = units;
+    return rows;
+  }
+
+  /// Writes what sync pulled, in [rows]' shape; null deletes that one version
+  /// or entry. Recipes arrive validated. Doesn't call [onWrite] — this isn't a
+  /// person's write, and syncing it back would be an echo.
+  ///
+  /// A recipe is filed under [_idFor] its own content, never a key it came
+  /// with: an id is a filename, and a row naming `../` would write outside
+  /// [dir].
+  // ponytail: no lock against a saveEntry landing mid-apply, the same as two
+  // saveEntry calls today. Serialise writes if a lost entry ever turns up.
+  Future<void> applyRows(Map<String, Object?> changes) async {
+    final parents = await _history();
+    final log = await _log();
+    for (final MapEntry(:key, :value) in changes.entries) {
+      final [kind, ...rest] = key.split('/');
+      switch (kind) {
+        case 'v':
+          final id = rest.join('/');
+          final row = value as Map<String, dynamic>?;
+          if (row == null) {
+            final file = _file(id);
+            if (_idPattern.hasMatch(id) && file.existsSync()) {
+              await file.delete();
+            }
+            parents.remove(id);
+            continue;
+          }
+          final recipe = Recipe.fromJson(row['recipe'] as Map<String, dynamic>);
+          if (_idFor(recipe) != id) {
+            debugPrint('Skipping synced recipe filed under the wrong id: $id');
+            continue;
+          }
+          await _save(recipe);
+          final parent = row['parent'];
+          if (parent is String) {
+            parents[id] = parent;
+          } else {
+            parents.remove(id);
+          }
+        case 'e':
+          final [version, ...entry] = rest;
+          final entryId = entry.join('/');
+          final kept = [
+            for (final e in log[version] ?? const <CookEntry>[])
+              if (e.id != entryId) e,
+            if (value != null) decodeEntry(value as Map),
+          ];
+          if (kept.isEmpty) {
+            log.remove(version);
+          } else {
+            log[version] = kept;
+          }
+        case 'units':
+          if (value is String) {
+            await _unitsFile.writeAsString(value);
+          } else if (_unitsFile.existsSync()) {
+            await _unitsFile.delete();
+          }
+      }
+    }
+    await _historyFile.writeAsString(jsonEncode(parents));
+    await _writeLog(log);
+  }
 
   /// One recipe file, or null if it won't decode — a corrupt file is skipped
   /// and logged rather than taking a whole listing down with it, and nothing is
@@ -285,19 +442,10 @@ class RecipeStore {
   /// Current versions only, newest first. Earlier versions stay on disk but are
   /// reached through [history] — listing them here would show one row per edit.
   Future<List<SavedRecipe>> loadAll() async {
-    if (!dir.existsSync()) return [];
-    final files = dir
-        .listSync()
-        .whereType<File>()
-        .where((f) => f.path.endsWith('.json'))
-        .toList();
-    final ids = {
-      for (final file in files)
-        file.uri.pathSegments.last.replaceFirst('.json', ''): file,
-    };
+    final ids = _files();
     // A tip is a version no *existing* file names as its parent. Reading the
     // links off surviving files means a deleted child can't strand its parent.
-    final parents = await _history();
+    final parents = _linear(await _history());
     final superseded = {
       for (final entry in parents.entries)
         if (ids.containsKey(entry.key)) entry.value,
@@ -312,9 +460,41 @@ class RecipeStore {
     saved.sort((a, b) => b.$2.createdAt.compareTo(a.$2.createdAt));
     return saved;
   }
+
+  /// Every recipe file by id.
+  Map<String, File> _files() => !dir.existsSync()
+      ? {}
+      : {
+          for (final file in dir.listSync().whereType<File>())
+            if (file.path.endsWith('.json'))
+              file.uri.pathSegments.last.replaceFirst('.json', ''): file,
+        };
 }
 
-CookEntry _decodeEntry(Map e) => (
+/// What [_idFor] makes, so a pulled deletion can't name a file outside the
+/// recipes.
+final _idPattern = RegExp(r'^\d+-[a-z0-9-]*$');
+
+/// A version's createdAt, read off its id.
+int _millis(String id) => int.tryParse(id.split('-').first) ?? 0;
+
+int _byAge(String a, String b) {
+  final byTime = _millis(a).compareTo(_millis(b));
+  return byTime != 0 ? byTime : a.compareTo(b);
+}
+
+/// A cook entry as `ratings.meta` holds it, and as sync carries it.
+Map<String, Object?> encodeEntry(CookEntry e) => {
+  'id': e.id,
+  // UTC on disk, so a cook keeps its moment when the phone changes timezone —
+  // or changes phone.
+  'date': e.date.toUtc().toIso8601String(),
+  'servings': e.servings,
+  'stars': e.stars,
+  'note': e.note,
+};
+
+CookEntry decodeEntry(Map e) => (
   id: e['id'] as String,
   date: DateTime.parse(e['date'] as String).toLocal(),
   servings: e['servings'] as int?,

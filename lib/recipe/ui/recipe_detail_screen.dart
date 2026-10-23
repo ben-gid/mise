@@ -7,6 +7,7 @@ import '../recipe_models.dart';
 import '../recipe_parser.dart';
 import '../recipe_scaling.dart';
 import '../recipe_store.dart';
+import '../recipe_sync.dart';
 import 'cook_log.dart';
 import 'glass.dart';
 import 'recipe_edit_screen.dart';
@@ -80,6 +81,17 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
     // Never cooked is the default state, so there is nothing to show while
     // this resolves — no spinner, which would hang pumpAndSettle.
     _loadEntries();
+    pulled.addListener(_onPulled);
+  }
+
+  /// Sync landed something from another phone while this is open: a cook for
+  /// this version, or a newer version of the recipe, which moves the screen
+  /// onto it the way an edit made here would.
+  Future<void> _onPulled() async {
+    final newest = await widget.store.newest(_id);
+    if (!mounted) return;
+    if (newest != null && newest.$1 != _id) _adopt(newest);
+    await _loadEntries();
   }
 
   Future<void> _loadEntries() async {
@@ -305,7 +317,11 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
     final restored = await Navigator.push<SavedRecipe>(
       context,
       MaterialPageRoute(
-        builder: (_) => RecipeHistoryScreen(id: _id, store: widget.store),
+        builder: (_) => RecipeHistoryScreen(
+          id: _id,
+          store: widget.store,
+          parser: widget.parser,
+        ),
       ),
     );
     if (restored != null && mounted) _adopt(restored);
@@ -313,6 +329,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
 
   @override
   void dispose() {
+    pulled.removeListener(_onPulled);
     _photos?.dispose();
     _close.dispose();
     super.dispose();
@@ -880,6 +897,9 @@ class _EntryDialogState extends State<_EntryDialog> {
     // rating had. Clearing an existing one is what Delete is for.
     final canSave = _stars > 0 || note.isNotEmpty;
     return AlertDialog(
+      // The default 40px a side leaves a 360dp phone too narrow for five
+      // stars and the stepper; 16 is the app's usual gutter.
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
       title: Text(widget.isNew ? 'I made it' : 'Edit cook'),
       content: SizedBox(
         width: double.maxFinite,
@@ -899,17 +919,21 @@ class _EntryDialogState extends State<_EntryDialog> {
                 onChanged: (value) => setState(() => _servings = value),
               ),
               const SizedBox(height: 8),
+              // An equal share each rather than 48px each, so the row can't
+              // be wider than the dialog however narrow the phone.
               Row(
-                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   for (var star = 1; star <= 5; star++)
-                    IconButton(
-                      // Tapping the current rating clears it — no extra button.
-                      onPressed: () =>
-                          setState(() => _stars = _stars == star ? 0 : star),
-                      icon: Icon(
-                        star <= _stars ? Icons.star : Icons.star_border,
-                        color: star <= _stars ? widget.accent : null,
+                    Expanded(
+                      child: IconButton(
+                        // Tapping the current rating clears it — no extra
+                        // button.
+                        onPressed: () =>
+                            setState(() => _stars = _stars == star ? 0 : star),
+                        icon: Icon(
+                          star <= _stars ? Icons.star : Icons.star_border,
+                          color: star <= _stars ? widget.accent : null,
+                        ),
                       ),
                     ),
                 ],
@@ -974,8 +998,10 @@ class _ServingsStepper extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
         child: Row(
           children: [
-            Text('Servings', style: theme.textTheme.titleMedium),
-            const Spacer(),
+            // Wraps rather than overflowing under a large system font.
+            Expanded(
+              child: Text('Servings', style: theme.textTheme.titleMedium),
+            ),
             IconButton.outlined(
               onPressed: servings > 1 ? () => onChanged(servings - 1) : null,
               icon: const Icon(Icons.remove),

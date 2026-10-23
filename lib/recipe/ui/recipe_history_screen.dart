@@ -1,6 +1,10 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import '../recipe_diff.dart';
+import '../recipe_models.dart';
+import '../recipe_parser.dart';
 import '../recipe_store.dart';
 import 'cook_log.dart';
 import 'glass.dart';
@@ -17,7 +21,15 @@ class RecipeHistoryScreen extends StatefulWidget {
   final String id;
   final RecipeStore store;
 
-  const RecipeHistoryScreen({super.key, required this.id, required this.store});
+  /// For an undo, which can make a recipe no version ever was.
+  final RecipeParser parser;
+
+  const RecipeHistoryScreen({
+    super.key,
+    required this.id,
+    required this.store,
+    required this.parser,
+  });
 
   @override
   State<RecipeHistoryScreen> createState() => _RecipeHistoryScreenState();
@@ -28,6 +40,7 @@ typedef _Version = ({
   SavedRecipe saved,
   List<CookEntry> entries,
   List<RecipeChange> changes,
+  bool forked,
 });
 
 class _RecipeHistoryScreenState extends State<RecipeHistoryScreen> {
@@ -35,6 +48,7 @@ class _RecipeHistoryScreenState extends State<RecipeHistoryScreen> {
 
   Future<List<_Version>> _load() async {
     final chain = await widget.store.history(widget.id);
+    final forked = await widget.store.forked();
     // ponytail: re-reads ratings.meta once per version; batch if chains
     // ever get long.
     final logs = await Future.wait(
@@ -50,6 +64,7 @@ class _RecipeHistoryScreenState extends State<RecipeHistoryScreen> {
           changes: index + 1 < chain.length
               ? diffRecipes(chain[index + 1].$2, saved.$2)
               : const <RecipeChange>[],
+          forked: forked.contains(saved.$1),
         ),
     ];
   }
@@ -62,6 +77,46 @@ class _RecipeHistoryScreenState extends State<RecipeHistoryScreen> {
       parent: widget.id,
     );
     if (mounted) Navigator.pop(context, restored);
+  }
+
+  /// Takes one version's own changes back out of the current recipe, as a new
+  /// version on top — unlike [_restore], every edit made since it stays.
+  ///
+  /// Validated, unlike a restore: a restored version was valid once, but an
+  /// undo can make a combination nothing ever was, like a step naming an
+  /// ingredient the undo removes.
+  Future<void> _undo(List<_Version> versions, int index) async {
+    final current = versions.first.saved.$2;
+    final undone = undoChanges(
+      parent: versions[index + 1].saved.$2,
+      version: versions[index].saved.$2,
+      current: current,
+    );
+    final messenger = ScaffoldMessenger.of(context);
+    if (jsonEncode(undone) == jsonEncode(current.toJson())) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Nothing left to undo — each of these was edited again '
+            'since.',
+          ),
+        ),
+      );
+      return;
+    }
+    final Recipe recipe;
+    try {
+      recipe = widget.parser.parse(jsonEncode(undone));
+    } on RecipeValidationException catch (e) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text("Can't undo this on its own: ${e.errors.first}"),
+        ),
+      );
+      return;
+    }
+    final saved = await widget.store.saveVersion(recipe, parent: widget.id);
+    if (mounted) Navigator.pop(context, saved);
   }
 
   @override
@@ -87,6 +142,7 @@ class _RecipeHistoryScreenState extends State<RecipeHistoryScreen> {
               isCurrent: index == 0,
               isOriginal: index == versions.length - 1,
               onRestore: () => _restore(versions[index]),
+              onUndo: () => _undo(versions, index),
             ),
           );
         },
@@ -101,6 +157,7 @@ class _VersionCard extends StatelessWidget {
   final bool isCurrent;
   final bool isOriginal;
   final VoidCallback onRestore;
+  final VoidCallback onUndo;
 
   const _VersionCard({
     required this.version,
@@ -108,6 +165,7 @@ class _VersionCard extends StatelessWidget {
     required this.isCurrent,
     required this.isOriginal,
     required this.onRestore,
+    required this.onUndo,
   });
 
   @override
@@ -141,7 +199,12 @@ class _VersionCard extends StatelessWidget {
             ),
             const SizedBox(height: 2),
             Text(
-              _formatDate(version.saved.$2.createdAt),
+              // A fork's diff is against the other phone's edit, not the
+              // version this one was made from — so say so.
+              version.forked
+                  ? '${_formatDate(version.saved.$2.createdAt)} · '
+                        'Edited on another device'
+                  : _formatDate(version.saved.$2.createdAt),
               style: theme.textTheme.bodySmall,
             ),
             if (entries.isNotEmpty) ...[
@@ -163,15 +226,29 @@ class _VersionCard extends StatelessWidget {
               Text('Saved with no changes', style: theme.textTheme.bodyMedium)
             else
               for (final change in version.changes) _ChangeRow(change: change),
-            if (!isCurrent) ...[
+            // Two ways back, because the card shows a *change* and a version
+            // is a whole recipe: Undo takes out what's listed above and keeps
+            // every later edit; Restore brings back this version entire,
+            // undoing everything since. A Wrap, so a narrow phone stacks them.
+            if (!isOriginal && version.changes.isNotEmpty || !isCurrent) ...[
               const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: OutlinedButton.icon(
-                  onPressed: onRestore,
-                  icon: const Icon(Icons.restore, size: 18),
-                  label: const Text('Restore'),
-                ),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (!isOriginal && version.changes.isNotEmpty)
+                    OutlinedButton.icon(
+                      onPressed: onUndo,
+                      icon: const Icon(Icons.undo, size: 18),
+                      label: const Text('Undo these changes'),
+                    ),
+                  if (!isCurrent)
+                    OutlinedButton.icon(
+                      onPressed: onRestore,
+                      icon: const Icon(Icons.restore, size: 18),
+                      label: const Text('Restore this version'),
+                    ),
+                ],
               ),
             ],
           ],
