@@ -102,7 +102,7 @@ void main() {
       await pumpUntil(
         tester,
         () =>
-            find.byType(ListView).evaluate().isNotEmpty ||
+            find.byType(CustomScrollView).evaluate().isNotEmpty ||
             find.text('No recipes yet').evaluate().isNotEmpty,
       );
     });
@@ -110,7 +110,7 @@ void main() {
   }
 
   Future<void> openImport(WidgetTester tester) async {
-    await tester.tap(find.widgetWithText(FloatingActionButton, 'Import'));
+    await tester.tap(find.widgetWithText(FloatingActionButton, 'Import recipe'));
     await tester.pumpAndSettle();
   }
 
@@ -126,7 +126,7 @@ void main() {
 
     expect(find.text('Garlic Butter Focaccia'), findsOneWidget);
     expect(find.textContaining('4 servings'), findsOneWidget);
-    expect(find.text('bread'), findsOneWidget); // tag chip
+    expect(find.textContaining('bread'), findsOneWidget); // first tag
   });
 
   testWidgets('importing valid JSON saves it and opens the recipe', (
@@ -144,7 +144,7 @@ void main() {
     });
     await tester.pumpAndSettle();
 
-    expect(find.text('Ingredients'), findsOneWidget); // on the detail screen
+    expect(find.text('Mise en place'), findsOneWidget); // on the detail screen
     final saved = await tester.runAsync(store.loadAll);
     expect(saved, hasLength(1));
   });
@@ -484,7 +484,7 @@ void main() {
     // title rather than three screens below it.
     expect(
       tester.getTopLeft(find.text('bread')).dy,
-      lessThan(tester.getTopLeft(find.text('Ingredients')).dy),
+      lessThan(tester.getTopLeft(find.text('Mise en place')).dy),
     );
   });
 
@@ -496,7 +496,7 @@ void main() {
 
     expect(
       tester.getTopLeft(find.textContaining('A slow-proofed focaccia')).dy,
-      lessThan(tester.getTopLeft(find.text('Ingredients')).dy),
+      lessThan(tester.getTopLeft(find.text('Mise en place')).dy),
     );
   });
 
@@ -1039,7 +1039,7 @@ void main() {
       );
       await pumpUntil(
         tester,
-        () => find.text('Ingredients').evaluate().isNotEmpty,
+        () => find.text('Mise en place').evaluate().isNotEmpty,
       );
     });
     await tester.pumpAndSettle();
@@ -1153,6 +1153,7 @@ void main() {
     addTearDown(tester.view.reset);
     await pumpDetail(tester);
 
+    await scrollTo(tester, find.text('I made it'));
     await tester.tap(find.text('I made it'));
     await tester.pumpAndSettle();
 
@@ -1175,6 +1176,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.byIcon(Icons.add));
     await tester.pump();
+    await scrollTo(tester, find.text('I made it'));
     await tester.tap(find.text('I made it'));
     await tester.pumpAndSettle();
 
@@ -1198,7 +1200,7 @@ void main() {
     });
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('for 6'), findsOneWidget);
+    expect(find.textContaining('Served 6'), findsOneWidget);
 
     // Reopen from disk, waiting for the stored entry rather than just the body.
     await pumpDetail(
@@ -1206,9 +1208,9 @@ void main() {
       ready: () => find.text('Halve the garlic').evaluate().isNotEmpty,
     );
 
-    expect(find.textContaining('for 6'), findsOneWidget);
-    // The headline's four and the entry's own four.
-    expect(find.byIcon(Icons.star), findsNWidgets(8));
+    expect(find.textContaining('Served 6'), findsOneWidget);
+    // The headline's one, beside its figure, and the entry's own four.
+    expect(find.byIcon(Icons.star), findsNWidgets(5));
   });
 
   testWidgets('an entry can be deleted from its dialog', (tester) async {
@@ -1219,6 +1221,7 @@ void main() {
       seed: (id) => store.saveEntry(id, cooked(stars: 4, note: 'crisp')),
     );
 
+    await scrollTo(tester, find.text('crisp'));
     await tester.tap(find.text('crisp'));
     await tester.pumpAndSettle();
     await tester.runAsync(() async {
@@ -1249,6 +1252,7 @@ void main() {
     expect(find.text('second'), findsOneWidget);
     expect(find.text('first'), findsNothing);
 
+    await scrollTo(tester, find.text('Show all (3)'));
     await tester.tap(find.text('Show all (3)'));
     await tester.pumpAndSettle();
 

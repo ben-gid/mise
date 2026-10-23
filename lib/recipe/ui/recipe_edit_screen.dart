@@ -500,9 +500,8 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final accent = tagAccent(context, widget.recipe.tags);
+    final accent = Theme.of(context).colorScheme.primary;
     return GlassScaffold(
-      tint: accent,
       appBar: glassAppBar(context, title: const Text('Edit recipe')),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _save,
@@ -930,7 +929,7 @@ class _RefTextController extends TextEditingController {
     required bool withComposing,
   }) {
     final refStyle = (style ?? const TextStyle()).copyWith(
-      color: tagAccent(context, const []),
+      color: Theme.of(context).colorScheme.primary,
       fontWeight: FontWeight.w600,
     );
     final spans = <TextSpan>[];

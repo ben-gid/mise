@@ -1,7 +1,9 @@
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../recipe_image.dart';
+import '../recipe_models.dart';
 import '../recipe_parser.dart';
 import '../recipe_store.dart';
 import '../recipe_sync.dart';
@@ -9,6 +11,12 @@ import 'glass.dart';
 import 'import_recipe_screen.dart';
 import 'recipe_detail_screen.dart';
 import 'settings_screen.dart';
+
+/// The library, and the cook log it is sorted against.
+typedef _Library = ({
+  List<SavedRecipe> recipes,
+  Map<String, List<CookEntry>> log,
+});
 
 class RecipeListScreen extends StatefulWidget {
   final RecipeStore store;
@@ -25,7 +33,10 @@ class RecipeListScreen extends StatefulWidget {
 }
 
 class _RecipeListScreenState extends State<RecipeListScreen> {
-  late Future<List<SavedRecipe>> _recipes = widget.store.loadAll();
+  late Future<_Library> _library = _load();
+
+  /// What the search field holds, lower-cased. Empty shows the whole library.
+  String _query = '';
 
   // Another phone's recipes, landed by sync.
   @override
@@ -40,12 +51,34 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
     super.dispose();
   }
 
+  Future<_Library> _load() async => (
+    recipes: await widget.store.loadAll(),
+    log: await widget.store.allEntries(),
+  );
+
   // Block body, not an arrow: an arrow returns the assigned Future, and
   // setState asserts on a callback that returns one.
   void _reload() {
     setState(() {
-      _recipes = widget.store.loadAll();
+      _library = _load();
     });
+  }
+
+  Future<void> _open(SavedRecipe saved) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => RecipeDetailScreen(
+          id: saved.$1,
+          recipe: saved.$2,
+          store: widget.store,
+          parser: widget.parser,
+        ),
+      ),
+    );
+    // An edit there saves a new version under a new id, and a cook logged
+    // there can change which recipe was last made.
+    if (mounted) _reload();
   }
 
   Future<void> _openImport() async {
@@ -58,20 +91,7 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
     );
     if (imported == null || !mounted) return;
     _reload();
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => RecipeDetailScreen(
-          id: imported.$1,
-          recipe: imported.$2,
-          store: widget.store,
-          parser: widget.parser,
-        ),
-      ),
-    );
-    // Editing from the detail screen saves a new version under a new id, so
-    // the row that opened it is stale by the time we come back.
-    if (mounted) _reload();
+    await _open(imported);
   }
 
   Future<void> _delete(SavedRecipe saved) async {
@@ -92,191 +112,300 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
     );
   }
 
+  bool _matches(SavedRecipe saved) {
+    if (_query.isEmpty) return true;
+    final recipe = saved.$2;
+    return [
+      recipe.title,
+      ...recipe.tags,
+      for (final ingredient in recipe.ingredients) ingredient.name,
+    ].any((text) => text.toLowerCase().contains(_query));
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Read here rather than down in the builders: this context sits above the
-    // Scaffold, which is where the inset is the app bar's height once. See
-    // glassAppBarInset.
-    final appBarInset = glassAppBarInset(context);
-    return GlassScaffold(
-      appBar: glassAppBar(
-        context,
-        title: const Text('Mise'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            tooltip: 'Settings',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => SettingsScreen(store: widget.store),
+    final theme = Theme.of(context);
+    // No app bar to set the status bar's icons, so say it here.
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: theme.brightness == Brightness.dark
+          ? SystemUiOverlayStyle.light
+          : SystemUiOverlayStyle.dark,
+      child: Scaffold(
+        floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: _openImport,
+          icon: const Icon(Icons.add),
+          label: const Text('Import recipe'),
+        ),
+        body: FutureBuilder<_Library>(
+          future: _library,
+          builder: (context, snapshot) {
+            // Reading a directory of small JSON files is a frame or two; a
+            // spinner would only flash. It would also never stop animating,
+            // which hangs pumpAndSettle in widget tests.
+            if (!snapshot.hasData) return const SizedBox.shrink();
+            final library = snapshot.data!;
+            if (library.recipes.isEmpty) return const _EmptyState();
+            // Sync already runs on launch, resume and every save; this is for
+            // the cook standing at a second phone who doesn't want to wait.
+            return RefreshIndicator(
+              onRefresh: syncNow,
+              child: _body(context, library),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _body(BuildContext context, _Library library) {
+    final theme = Theme.of(context);
+    final searching = _query.isNotEmpty;
+    // The recipe whose current version was cooked most recently. Not shown
+    // while searching: a search is asking for something else.
+    SavedRecipe? lastMade;
+    DateTime? lastDate;
+    if (!searching) {
+      for (final saved in library.recipes) {
+        final newest = library.log[saved.$1]?.firstOrNull?.date;
+        if (newest != null && (lastDate == null || newest.isAfter(lastDate))) {
+          lastMade = saved;
+          lastDate = newest;
+        }
+      }
+    }
+    final shown = [
+      for (final saved in library.recipes)
+        if (saved != lastMade && _matches(saved)) saved,
+    ];
+    final heading = searching
+        ? '${shown.length} found'
+        : lastMade == null
+        ? 'All recipes · ${shown.length}'
+        : 'Everything else · ${shown.length}';
+    final width = MediaQuery.sizeOf(context).width;
+    // Two across on a phone, more as a tablet gives room, never a tile under
+    // ~170dp — the size a title still wraps to two lines in.
+    final columns = ((width - 32) / 220).floor().clamp(2, 5);
+
+    Widget tile(SavedRecipe saved) => _Tile(
+      saved: saved,
+      stars: headlineStars(library.log[saved.$1] ?? const []),
+      store: widget.store,
+      onTap: () => _open(saved),
+      onDelete: () => _delete(saved),
+    );
+
+    return CustomScrollView(
+      // A short library still has to pull.
+      physics: const AlwaysScrollableScrollPhysics(),
+      slivers: [
+        SliverSafeArea(
+          bottom: false,
+          sliver: SliverPadding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            sliver: SliverToBoxAdapter(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Recipes',
+                          style: theme.textTheme.headlineLarge,
+                        ),
+                      ),
+                      IconButton.filledTonal(
+                        icon: const Icon(Icons.tune),
+                        tooltip: 'Settings',
+                        style: IconButton.styleFrom(
+                          backgroundColor: glassFill(context),
+                          fixedSize: const Size(48, 48),
+                        ),
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => SettingsScreen(store: widget.store),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    onChanged: (value) => setState(
+                      () => _query = value.trim().toLowerCase(),
+                    ),
+                    textInputAction: TextInputAction.search,
+                    decoration: InputDecoration(
+                      hintText: 'Search by name, tag or ingredient',
+                      prefixIcon: const Icon(Icons.search),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(24),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                  if (lastMade case final lastMade?) ...[
+                    const SizedBox(height: 22),
+                    _SectionLabel('Last made'),
+                    const SizedBox(height: 10),
+                    _Featured(
+                      saved: lastMade,
+                      stars: headlineStars(library.log[lastMade.$1]!),
+                      cooks: library.log[lastMade.$1]!.length,
+                      store: widget.store,
+                      onTap: () => _open(lastMade),
+                    ),
+                  ],
+                  const SizedBox(height: 24),
+                  _SectionLabel(heading),
+                  const SizedBox(height: 10),
+                  if (shown.isEmpty && searching)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 24),
+                      child: Text(
+                        'Nothing matches “$_query”.',
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
           ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _openImport,
-        icon: const Icon(Icons.add),
-        label: const Text('Import'),
-      ),
-      body: FutureBuilder<List<SavedRecipe>>(
-        future: _recipes,
-        builder: (context, snapshot) {
-          // Reading a directory of small JSON files is a frame or two; a
-          // spinner would only flash. It would also never stop animating,
-          // which hangs pumpAndSettle in widget tests.
-          if (!snapshot.hasData) return const SizedBox.shrink();
-          final recipes = snapshot.data!;
-          if (recipes.isEmpty) return _EmptyState(appBarInset: appBarInset);
-          final colors = Theme.of(context).colorScheme;
-          // Sync already runs on launch, resume and every save; this is for
-          // the cook standing at a second phone who doesn't want to wait.
-          return RefreshIndicator(
-            onRefresh: syncNow,
-            edgeOffset: appBarInset,
-            child: ListView.builder(
-              // A short list still has to pull.
-              physics: const AlwaysScrollableScrollPhysics(),
-              // Rows run edge to edge, so the only padding is vertical: clear the
-              // blurred app bar the body scrolls under, and the FAB at the bottom.
-              padding: EdgeInsets.only(top: appBarInset, bottom: 88),
-              itemCount: recipes.length,
-              itemBuilder: (context, index) {
-                final saved = recipes[index];
-                return Dismissible(
-                  key: ValueKey(saved.$1),
-                  direction: DismissDirection.endToStart,
-                  background: Container(
-                    alignment: Alignment.centerRight,
-                    padding: const EdgeInsets.only(right: 24),
-                    color: colors.error.withValues(alpha: 0.22),
-                    child: Icon(Icons.delete_outline, color: colors.error),
-                  ),
-                  onDismissed: (_) => _delete(saved),
-                  child: _RecipeRow(
-                    saved: saved,
-                    store: widget.store,
-                    parser: widget.parser,
-                    onReturn: _reload,
-                    // The sheet's own bottom edge closes the last row.
-                    ruled: index < recipes.length - 1,
-                  ),
-                );
-              },
+        ),
+        SliverPadding(
+          // Clears the import button floating over the last row.
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 104),
+          // Rows of tiles rather than a SliverGrid: a grid cell has a fixed
+          // height, and a tile is a square photo plus a title that may take one
+          // line or two, at whatever text size the phone is set to.
+          sliver: SliverList.builder(
+            itemCount: (shown.length / columns).ceil(),
+            itemBuilder: (context, row) => Padding(
+              padding: const EdgeInsets.only(bottom: 20),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (var column = 0; column < columns; column++) ...[
+                    if (column > 0) const SizedBox(width: 14),
+                    Expanded(
+                      child: row * columns + column < shown.length
+                          ? tile(shown[row * columns + column])
+                          : const SizedBox.shrink(),
+                    ),
+                  ],
+                ],
+              ),
             ),
-          );
-        },
-      ),
+          ),
+        ),
+      ],
     );
   }
 }
 
-/// Art size, and the inset the divider takes so it starts at the title rather
-/// than the screen edge.
-const _coverSize = 64.0;
-const _dividerIndent = 16.0 + _coverSize + 12.0;
+class _SectionLabel extends StatelessWidget {
+  final String text;
 
-/// A track row: generated cover, title, the shape of the recipe, its tags.
+  const _SectionLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Text(
+      text.toUpperCase(),
+      style: weighted(
+        theme.textTheme.labelMedium,
+        FontWeight.w600,
+      )?.copyWith(color: theme.colorScheme.primary, letterSpacing: 1.2),
+    );
+  }
+}
+
+/// "bread · 4 servings · ★ 4" — what kind of thing, how big, and how it went.
 ///
-/// Full bleed, and the fill is the panel fill rather than a margin'd
-/// [GlassPanel], so a run of rows reads as one sheet of glass with hairlines
-/// ruled across it.
-class _RecipeRow extends StatelessWidget {
+/// The star is an icon, not a character: Geist has no ★ glyph.
+InlineSpan _meta(BuildContext context, List<String> parts, int stars) {
+  final color = Theme.of(context).colorScheme.primary;
+  return TextSpan(
+    children: [
+      TextSpan(text: parts.join(' · ')),
+      if (stars > 0) ...[
+        TextSpan(text: parts.isEmpty ? '' : ' · '),
+        WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: Icon(Icons.star, size: 14, color: color),
+        ),
+        TextSpan(text: ' $stars'),
+      ],
+    ],
+  );
+}
+
+String _servings(Recipe recipe) =>
+    '${recipe.baseServings} ${recipe.baseServings == 1 ? 'serving' : 'servings'}';
+
+/// One recipe in the grid: its photo, its name, a line about it.
+class _Tile extends StatelessWidget {
   final SavedRecipe saved;
+  final int stars;
   final RecipeStore store;
-  final RecipeParser parser;
-  final bool ruled;
+  final VoidCallback onTap;
+  final VoidCallback onDelete;
 
-  /// Called on the way back from the detail screen: an edit there saves a new
-  /// version under a new id, which this row does not know about.
-  final VoidCallback onReturn;
-
-  const _RecipeRow({
+  const _Tile({
     required this.saved,
+    required this.stars,
     required this.store,
-    required this.parser,
-    required this.ruled,
-    required this.onReturn,
+    required this.onTap,
+    required this.onDelete,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final recipe = saved.$2;
-    // A recipe keeps its colour: the same hue the detail screen's backdrop
-    // takes, here carrying the cover and the tag that named it.
-    final accent = tagAccent(context, recipe.tags);
-    return Material(
-      color: glassFill(context),
+    return Dismissible(
+      key: ValueKey(saved.$1),
+      direction: DismissDirection.endToStart,
+      background: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 20),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.errorContainer,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Icon(Icons.delete_outline, color: theme.colorScheme.error),
+      ),
+      onDismissed: (_) => onDelete(),
       child: InkWell(
-        onTap: () async {
-          await Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => RecipeDetailScreen(
-                id: saved.$1,
-                recipe: recipe,
-                store: store,
-                parser: parser,
-              ),
-            ),
-          );
-          onReturn();
-        },
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-              child: Row(
-                children: [
-                  _Cover(
-                    letter: recipe.title[0].toUpperCase(),
-                    accent: accent,
-                    urls: recipe.imageUrls,
-                    title: recipe.title,
-                    query: recipe.imageQuery,
-                    store: store,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          recipe.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '${recipe.baseServings} '
-                          '${recipe.baseServings == 1 ? 'serving' : 'servings'}'
-                          ' · ${recipe.steps.length} steps',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.bodySmall,
-                        ),
-                        if (recipe.tags.isNotEmpty) ...[
-                          const SizedBox(height: 6),
-                          _TagStrip(tags: recipe.tags),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
+            AspectRatio(
+              aspectRatio: 1,
+              child: _Cover(recipe: recipe, store: store, radius: 16),
+            ),
+            const SizedBox(height: 8),
+            Text(recipe.title, style: serif(21, height: 1.08)),
+            const SizedBox(height: 4),
+            Text.rich(
+              _meta(context, [
+                if (recipe.tags.isNotEmpty) recipe.tags.first,
+                _servings(recipe),
+              ], stars),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
-            if (ruled)
-              Divider(
-                height: 1,
-                thickness: 1,
-                // Starts at the title rather than the screen edge, so the run
-                // of covers down the left reads as its own column.
-                indent: _dividerIndent,
-                color: glassRim(context),
-              ),
           ],
         ),
       ),
@@ -284,39 +413,82 @@ class _RecipeRow extends StatelessWidget {
   }
 }
 
+/// The recipe cooked most recently, given the width of the page.
+class _Featured extends StatelessWidget {
+  final SavedRecipe saved;
+  final int stars;
+  final int cooks;
+  final RecipeStore store;
+  final VoidCallback onTap;
+
+  const _Featured({
+    required this.saved,
+    required this.stars,
+    required this.cooks,
+    required this.store,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final recipe = saved.$2;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ConstrainedBox(
+            // A tablet's width would otherwise make this a wall of photo.
+            constraints: const BoxConstraints(maxHeight: 320),
+            child: AspectRatio(
+              aspectRatio: 16 / 10,
+              child: _Cover(recipe: recipe, store: store, radius: 20),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: Text(recipe.title, style: serif(28, height: 1.05)),
+              ),
+              const SizedBox(width: 12),
+              Text.rich(
+                _meta(context, ['made $cooks×'], stars),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// The recipe's photo, or — while one is being found, and for a recipe that
 /// never gets one — generated art: its tag hue, lit from the top left, under
-/// the initial of its title.
+/// the initial of its title. Fills whatever box it is given.
 ///
-/// Runs the full [ImageChain], Wikipedia fallback included, which the list used
-/// to skip on the grounds that several network attempts per row is a real cost.
-/// It is a smaller cost than it was: the import prompt no longer asks the model
-/// to pad `image_urls` with guesses, so most rows spend no attempt on urls of
-/// their own, and [wikipediaImage] is memoised per title — a row shares its
-/// lookup with the detail screen and with every other recipe for the same dish.
+/// Runs the full [ImageChain], Wikipedia fallback included. The import prompt
+/// no longer asks the model to pad `image_urls` with guesses, so most tiles
+/// spend no attempt on urls of their own, and [wikipediaImage] is memoised per
+/// title — a tile shares its lookup with the detail screen and with every
+/// other recipe for the same dish.
 // ponytail: still one API call per distinct title on first scroll. Resolve only
 // what is already in the memo if a large library ever makes that felt.
 class _Cover extends StatefulWidget {
-  final String letter;
-  final Color accent;
-  final List<String> urls;
-
-  /// The dish, for the fallback — see [ImageChain.title].
-  final String title;
-
-  /// What the dish looks like — see [ImageChain.query]. A row runs the same
-  /// search the detail screen does, off the same memo, so the two cannot
-  /// settle on different photos for one recipe.
-  final String? query;
+  final Recipe recipe;
   final RecipeStore store;
+  final double radius;
 
   const _Cover({
-    required this.letter,
-    required this.accent,
-    required this.urls,
-    required this.title,
-    required this.query,
+    required this.recipe,
     required this.store,
+    required this.radius,
   });
 
   @override
@@ -338,14 +510,16 @@ class _CoverState extends State<_Cover> {
     _start();
   }
 
-  /// Rows are keyed by recipe id, so this mostly guards a reload that swaps a
+  /// Tiles are keyed by recipe id, so this mostly guards a reload that swaps a
   /// recipe's content under the id it already had.
   @override
   void didUpdateWidget(_Cover oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (listEquals(oldWidget.urls, widget.urls) &&
-        oldWidget.title == widget.title &&
-        oldWidget.query == widget.query) {
+    final was = oldWidget.recipe;
+    final now = widget.recipe;
+    if (listEquals(was.imageUrls, now.imageUrls) &&
+        was.title == now.title &&
+        was.imageQuery == now.imageQuery) {
       return;
     }
     _start();
@@ -354,13 +528,13 @@ class _CoverState extends State<_Cover> {
   void _start() {
     _chain?.dispose();
     _chain = ImageChain(
-      widget.urls,
+      widget.recipe.imageUrls,
       widget.store,
       () {
         if (mounted) setState(() {});
       },
-      title: widget.title,
-      query: widget.query,
+      title: widget.recipe.title,
+      query: widget.recipe.imageQuery,
     );
     _chain!.resolve(createLocalImageConfiguration(context));
   }
@@ -373,33 +547,31 @@ class _CoverState extends State<_Cover> {
 
   @override
   Widget build(BuildContext context) {
-    final accent = widget.accent;
+    final recipe = widget.recipe;
+    final accent = tagAccent(context, recipe.tags);
     final image = imageFor(_chain?.winner, widget.store);
-    final initial = Text(
-      widget.letter,
-      style: Theme.of(
-        context,
-      ).textTheme.titleMedium?.copyWith(fontSize: 22, color: onAccent(accent)),
+    final initial = Center(
+      child: Text(
+        recipe.title.characters.first.toUpperCase(),
+        style: serif(44).copyWith(color: onAccent(accent)),
+      ),
     );
     return Container(
-      width: _coverSize,
-      height: _coverSize,
-      alignment: Alignment.center,
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(pillRadius),
+        borderRadius: BorderRadius.circular(widget.radius),
         gradient: coverGradient(accent),
       ),
       // The generated art stays underneath rather than being an alternative to
       // the photo, so it is what shows through while the chain is still looking
       // and what is left when it comes back with nothing. No loadingBuilder — a
-      // spinner per row would be dozens of indefinite animations (CLAUDE.md).
+      // spinner per tile would be dozens of indefinite animations (CLAUDE.md).
       child: image == null
           ? initial
           : Image(
               image: image,
-              width: _coverSize,
-              height: _coverSize,
+              width: double.infinity,
+              height: double.infinity,
               fit: BoxFit.cover,
               errorBuilder: (context, _, _) => initial,
             ),
@@ -407,119 +579,35 @@ class _CoverState extends State<_Cover> {
   }
 }
 
-/// One line of tags, scrolled rather than wrapped, so a heavily tagged recipe
-/// can't grow its row taller than the rest. Whichever edge still has tags out
-/// of view fades out, so a cut-off row reads as scrollable rather than clipped.
-///
-/// SingleChildScrollView and not a horizontal ListView: it keeps every chip
-/// built, so off-screen tags stay findable in widget tests.
-class _TagStrip extends StatefulWidget {
-  final List<String> tags;
-
-  const _TagStrip({required this.tags});
-
-  @override
-  State<_TagStrip> createState() => _TagStripState();
-}
-
-class _TagStripState extends State<_TagStrip> {
-  bool _fadeStart = false;
-  bool _fadeEnd = false;
-
-  /// Metrics arrive from two places: ScrollMetricsNotification on first layout
-  /// and on resize, ScrollNotification while dragging. Neither alone covers
-  /// both, and the row must already be faded before anyone touches it.
-  bool _sync(ScrollMetrics metrics) {
-    final start = metrics.extentBefore > 1;
-    final end = metrics.extentAfter > 1;
-    if (start == _fadeStart && end == _fadeEnd) return false;
-    // The first-layout notification lands mid-frame, so defer the rebuild.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      setState(() {
-        _fadeStart = start;
-        _fadeEnd = end;
-      });
-    });
-    return false;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scroller = SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          for (final tag in widget.tags)
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: Chip(
-                label: Text(tag),
-                visualDensity: VisualDensity.compact,
-                padding: EdgeInsets.zero,
-              ),
-            ),
-        ],
-      ),
-    );
-
-    return NotificationListener<ScrollMetricsNotification>(
-      onNotification: (n) => _sync(n.metrics),
-      child: NotificationListener<ScrollNotification>(
-        onNotification: (n) => _sync(n.metrics),
-        // ShaderMask costs a save layer, so skip it entirely on the common
-        // card whose tags all fit.
-        child: !_fadeStart && !_fadeEnd
-            ? scroller
-            : ShaderMask(
-                blendMode: BlendMode.dstIn,
-                shaderCallback: (bounds) => LinearGradient(
-                  begin: Alignment.centerLeft,
-                  end: Alignment.centerRight,
-                  colors: [
-                    _fadeStart ? Colors.transparent : Colors.white,
-                    Colors.white,
-                    Colors.white,
-                    _fadeEnd ? Colors.transparent : Colors.white,
-                  ],
-                  stops: const [0, 0.08, 0.92, 1],
-                ).createShader(bounds),
-                child: scroller,
-              ),
-      ),
-    );
-  }
-}
-
 class _EmptyState extends StatelessWidget {
-  final double appBarInset;
-
-  const _EmptyState({required this.appBarInset});
+  const _EmptyState();
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(32, 32 + appBarInset, 32, 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.menu_book_outlined,
-              size: 56,
-              color: theme.colorScheme.primary,
-            ),
-            const SizedBox(height: 16),
-            Text('No recipes yet', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 8),
-            Text(
-              'Tap Import to paste a recipe from an LLM. Use "Copy prompt" '
-              'there to get one in the right shape.',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium,
-            ),
-          ],
+    return SafeArea(
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'No recipes yet',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.headlineMedium,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Tap Import recipe to paste one from an LLM. “Copy prompt” '
+                'there gets it in the right shape.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyLarge?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

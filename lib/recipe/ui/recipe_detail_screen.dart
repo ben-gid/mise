@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../recipe_image.dart';
@@ -117,7 +118,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
             ),
         isNew: existing == null,
         fallbackServings: _recipe.baseServings,
-        accent: tagAccent(context, _recipe.tags),
+        accent: Theme.of(context).colorScheme.primary,
       ),
     );
     if (result == null) return;
@@ -247,7 +248,6 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
     if (!mounted) return;
     final picked = await showModalBottomSheet<String>(
       context: context,
-      backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (_) => _PhotoSheet(photos: photos, store: widget.store),
     );
@@ -351,16 +351,28 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
     );
   }
 
+
+  /// Ingredients ticked off as they come out of the cupboard. Per visit, like
+  /// [_flipped]: a checklist for tonight, not a fact about the recipe.
+  final _ready = <String>{};
+
+  void _tick(Ingredient ingredient) {
+    setState(() {
+      if (!_ready.remove(ingredient.id)) _ready.add(ingredient.id);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final recipe = _recipe;
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final factor = scaleFactor(recipe, _servings);
-    // Tag Prism: the recipe arrives carrying its own light.
-    final accent = tagAccent(context, recipe.tags);
+    final accent = scheme.primary;
+    final timed = recipe.steps.fold(0, (sum, s) => sum + (s.timerSeconds ?? 0));
+    final convertible = recipe.ingredients.any(canConvert);
 
     return GlassScaffold(
-      tint: accent,
       // No `appBar`: the photo has to scroll *under* the bar rather than sit
       // below it, and Scaffold.appBar only takes a PreferredSizeWidget.
       //
@@ -370,156 +382,134 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
         animation: _close,
         builder: (context, _) => CustomScrollView(
           slivers: [
-            _hero(context, accent),
+            _hero(context),
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
               sliver: SliverList.list(
                 children: [
-                  // The recipe's name, and what kind of thing it is. Centred
-                  // and free to wrap: a toolbar could only ever give it 56px,
-                  // which is two lines and a truncation.
-                  Text(
-                    recipe.title,
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.headlineMedium,
-                  ),
                   if (recipe.tags.isNotEmpty) ...[
+                    _TagLine(tags: recipe.tags),
                     const SizedBox(height: 12),
-                    // Up here rather than at the foot of the page: tagAccent
-                    // draws the whole screen's colour from the first of these,
-                    // so this is where the hue gets explained.
-                    Wrap(
-                      alignment: WrapAlignment.center,
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        for (final tag in recipe.tags) Chip(label: Text(tag)),
-                      ],
-                    ),
                   ],
-                  const SizedBox(height: 28),
+                  // Free to wrap: a toolbar could only ever give it 56px,
+                  // which is two lines and a truncation.
+                  Text(recipe.title, style: theme.textTheme.headlineMedium),
                   if (recipe.notes case final notes? when notes.isNotEmpty) ...[
+                    const SizedBox(height: 14),
                     _Headnote(text: notes),
-                    const SizedBox(height: 16),
                   ],
-                  _ServingsStepper(
+                  const SizedBox(height: 18),
+                  _Facts(
                     servings: _servings,
-                    onChanged: (value) => setState(() => _servings = value),
-                  ),
-                  const SizedBox(height: 24),
-                  _CookLog(
+                    onServings: (value) => setState(() => _servings = value),
+                    timed: timed,
                     entries: _entries,
-                    accent: accent,
-                    onAdd: _logCook,
-                    onEdit: _logCook,
                   ),
-                  const SizedBox(height: 24),
-                  Text('Ingredients', style: theme.textTheme.titleLarge),
-                  const SizedBox(height: 8),
-                  for (final ingredient in recipe.ingredients)
-                    InkWell(
-                      // The whole line, not just the amount: one line is one
-                      // ingredient, and a bare text run is a target too small for a
-                      // hand that is also holding a bowl. InkWell rather than a bare
-                      // GestureDetector so the row is reachable by keyboard and
-                      // announced as a button — a detector is neither. Every row
-                      // taps, including the ones that can't switch; those answer
-                      // with a SnackBar rather than nothing.
-                      onTap: () => _toggle(ingredient),
-                      // The default focus overlay is invisible against the backdrop,
-                      // and a keyboard user needs to see where they are.
-                      focusColor: accent.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(pillRadius),
-                      // The band sits inside the tap target rather than being it:
-                      // trimming the box the InkWell owns would cost finger-sized,
-                      // and two banded rows in a row need a gap or they fuse.
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 3),
-                        // Ink, not a DecoratedBox, so it paints *on* the Material
-                        // and the InkWell's focus and splash still land above it.
-                        child: Ink(
-                          decoration: BoxDecoration(
-                            // Marks an amount computed through a density, not one the
-                            // reader tapped: a tap back onto the stored unit clears
-                            // it, and the setting lights a whole recipe at once.
-                            color:
-                                isDerived(
-                                  ingredient,
-                                  flip: _flipped.contains(ingredient.id),
-                                )
-                                ? accent.withValues(alpha: 0.10)
-                                : null,
-                            borderRadius: BorderRadius.circular(pillRadius),
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(8, 7, 8, 7),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  // The amount sits in the run of text, so a long name
-                                  // wraps under it instead of into a narrow second
-                                  // column. It stays a WidgetSpan only so it can
-                                  // crossfade when the servings change; the baseline
-                                  // alignment is what keeps it reading as one line.
-                                  child: Text.rich(
-                                    TextSpan(
-                                      children: [
-                                        WidgetSpan(
-                                          alignment:
-                                              PlaceholderAlignment.baseline,
-                                          baseline: TextBaseline.alphabetic,
-                                          child: Padding(
-                                            padding: const EdgeInsets.only(
-                                              right: 6,
-                                            ),
-                                            child: _Amount(
-                                              label: amountLabel(
-                                                ingredient,
-                                                factor,
-                                                flip: _flipped.contains(
-                                                  ingredient.id,
-                                                ),
-                                              ),
-                                              accent: accent,
-                                            ),
-                                          ),
-                                        ),
-                                        TextSpan(text: ingredient.name),
-                                      ],
-                                    ),
-                                    style: theme.textTheme.bodyLarge,
-                                  ),
-                                ),
-                                if (canConvert(ingredient))
-                                  Icon(
-                                    Icons.swap_horiz,
-                                    size: 20,
-                                    color: accent.withValues(alpha: 0.75),
-                                  ),
-                              ],
-                            ),
+                  const SizedBox(height: 28),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Mise en place',
+                          style: theme.textTheme.headlineSmall,
+                        ),
+                      ),
+                      Text(
+                        _ready.length == recipe.ingredients.length
+                            ? 'All ready'
+                            : '${_ready.length} of '
+                                  '${recipe.ingredients.length} ready',
+                        style: weighted(
+                          theme.textTheme.bodyMedium,
+                          FontWeight.w600,
+                        )?.copyWith(color: accent),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Tick things off as you get them out.',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: scheme.onSurfaceVariant,
                           ),
                         ),
                       ),
+                      // Kept in the row even when there is nothing to reset,
+                      // so ticking the first item doesn't shift the list.
+                      TextButton(
+                        onPressed: _ready.isEmpty
+                            ? null
+                            : () => setState(_ready.clear),
+                        child: const Text('Reset'),
+                      ),
+                    ],
+                  ),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(2),
+                    child: LinearProgressIndicator(
+                      // Determinate, so it never animates on its own.
+                      value: recipe.ingredients.isEmpty
+                          ? 0
+                          : _ready.length / recipe.ingredients.length,
+                      minHeight: 3,
+                      backgroundColor: glassRim(context),
                     ),
-                  const SizedBox(height: 24),
-                  Text('Steps', style: theme.textTheme.titleLarge),
-                  const SizedBox(height: 8),
+                  ),
+                  for (final ingredient in recipe.ingredients)
+                    _IngredientRow(
+                      ingredient: ingredient,
+                      label: amountLabel(
+                        ingredient,
+                        factor,
+                        flip: _flipped.contains(ingredient.id),
+                      ),
+                      derived: isDerived(
+                        ingredient,
+                        flip: _flipped.contains(ingredient.id),
+                      ),
+                      ready: _ready.contains(ingredient.id),
+                      onTick: () => _tick(ingredient),
+                      onSwitch: () => _toggle(ingredient),
+                    ),
+                  if (convertible) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      'Tap an amount to switch units. Shaded ones are '
+                      'converted by density — close, not exact.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 30),
+                  Text('Method', style: theme.textTheme.headlineSmall),
+                  const SizedBox(height: 4),
                   for (final (index, step) in recipe.steps.indexed)
-                    _StepCard(
+                    _StepRow(
                       number: index + 1,
                       step: step,
-                      recipe: recipe,
-                      factor: factor,
-                      flipped: _flipped,
-                      accent: accent,
+                      last: index == recipe.steps.length - 1,
+                      text: renderContent(
+                        step,
+                        recipe,
+                        factor,
+                        flipped: _flipped,
+                      ),
                     ),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Source: ${recipe.source}',
-                    style: theme.textTheme.bodySmall,
-                  ),
+                  const SizedBox(height: 30),
                 ],
+              ),
+            ),
+            SliverToBoxAdapter(
+              child: _CookLog(
+                entries: _entries,
+                source: recipe.source,
+                onAdd: _logCook,
+                onEdit: _logCook,
               ),
             ),
           ],
@@ -530,73 +520,82 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
 
   /// The bar, and the photo behind it when there is one.
   ///
-  /// Without any urls this is exactly the bar the rest of the app uses. With
-  /// them, the photo scrolls up under a frost that fogs in as it goes — the
-  /// blur in [frostPane] has spent this app's whole life smoothing a gradient,
-  /// and a photograph is the first thing it has had to actually fog.
+  /// Without any urls this is a plain bar. With them, the photo scrolls up and
+  /// the page closes over it as it goes.
   ///
   /// When every url turns out to be dead the hero eases shut and this becomes
   /// the plain bar: a recipe whose photos don't load is a recipe with no photo,
   /// not one wearing generated art in a picture's place.
-  Widget _hero(BuildContext context, Color accent) {
-    final actions = [
-      // Unconditional, where this used to appear only on a recipe with nothing
-      // to look at. With a photo search in the chain almost every recipe has
-      // something, so that gate would hide the button in exactly the case it
-      // now exists for: a picture loaded, and it is the wrong one.
-      IconButton(
-        onPressed: _pickPhoto,
-        tooltip: 'Choose photo',
-        icon: const Icon(Icons.add_a_photo_outlined),
-      ),
-      IconButton(
-        onPressed: _openHistory,
-        tooltip: 'Version history',
-        icon: const Icon(Icons.history),
-      ),
-      IconButton(
-        onPressed: _edit,
-        tooltip: 'Edit recipe',
-        icon: const Icon(Icons.edit_outlined),
-      ),
-      IconButton(
-        onPressed: _share,
-        tooltip: 'Share recipe',
-        icon: const Icon(Icons.share),
-      ),
-    ];
+  Widget _hero(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    // One oval rather than four loose buttons: they are one group of things
+    // you do *to* the recipe, and on a photo four separate circles read as
+    // four stickers.
+    Widget bar({required double overPhoto}) => _Pill(
+      overPhoto: overPhoto,
+      children: [
+        // Unconditional: with a photo search in the chain almost every recipe
+        // has *something*, and the case this exists for is that it loaded and
+        // is the wrong one.
+        IconButton(
+          onPressed: _pickPhoto,
+          tooltip: 'Choose photo',
+          icon: const Icon(Icons.photo_camera_outlined),
+        ),
+        IconButton(
+          onPressed: _openHistory,
+          tooltip: 'Version history',
+          icon: const Icon(Icons.history),
+        ),
+        IconButton(
+          onPressed: _edit,
+          tooltip: 'Edit recipe',
+          icon: const Icon(Icons.edit_outlined),
+        ),
+        IconButton(
+          onPressed: _share,
+          tooltip: 'Share recipe',
+          icon: const Icon(Icons.ios_share),
+        ),
+      ],
+    );
+    Widget back({required double overPhoto}) => Center(
+      child: _Pill(overPhoto: overPhoto, children: const [BackButton()]),
+    );
 
     if (_recipe.imageUrls.isEmpty && _photos?.winner == null) {
       // Nothing on screen and nothing claimed: either the lookup is still out
-      // or it missed. Pixel-identical to what every other screen shows, so a
-      // recipe with no photo pays nothing for a feature it isn't using — and
-      // a fallback that arrives late finds the hero shut and opens it.
+      // or it missed. A recipe with no photo pays nothing for the feature —
+      // and a fallback that arrives late finds the hero shut and opens it.
       return SliverAppBar(
         pinned: true,
-        actions: actions,
-        flexibleSpace: frostPane(context),
+        leading: back(overPhoto: 0),
+        leadingWidth: 64,
+        actions: [bar(overPhoto: 0), const SizedBox(width: 12)],
+        flexibleSpace: barPane(context),
       );
     }
 
     final collapsed = MediaQuery.paddingOf(context).top + kToolbarHeight;
-    // A third of the screen: enough that the photo is the thing you land on,
-    // little enough that a recipe read at a counter is still one thumb-scroll
-    // from its ingredients. Clamped so a phone in landscape isn't all picture
-    // and a tablet gets its extra room.
-    final full = (MediaQuery.sizeOf(context).height * 0.32).clamp(220.0, 340.0);
+    // Just under half a phone: the photo is the thing you land on, and the
+    // ingredients are still one thumb-scroll away. Clamped so a phone in
+    // landscape isn't all picture and a tablet gets its extra room.
+    final full = (MediaQuery.sizeOf(context).height * 0.42).clamp(260.0, 440.0);
     // Rides _close down to the toolbar when the chain gives up. At the bottom
     // the SliverAppBar is already shaped exactly like the plain one, so there
     // is no second widget to cross-fade into.
     final expanded = full - (full - collapsed) * _close.value;
     final winner = _photos?.winner;
 
-    // SliverLayoutBuilder, not a ScrollController: the fog is a function of how
-    // far this sliver has scrolled, which layout already knows. The only thing
-    // that animates is _close, which is finite (see CLAUDE.md).
+    // SliverLayoutBuilder, not a ScrollController: how far the page has closed
+    // over the photo is a function of how far this sliver has scrolled, which
+    // layout already knows. The only thing that animates is _close, which is
+    // finite (see CLAUDE.md).
     return SliverLayoutBuilder(
       builder: (context, constraints) {
         // Goes to zero as the hero closes, and dividing by it would put a NaN
-        // straight into the frost's opacity.
+        // straight into the pane's opacity.
         final span = expanded - collapsed;
         final open = span <= 0
             ? 0.0
@@ -604,51 +603,73 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
         return SliverAppBar(
           pinned: true,
           expandedHeight: expanded,
-          // Icons ride from white over the photo to the page's own ink over the
-          // frost. A fixed colour loses one end or the other: white vanishes
-          // into the light theme's frost, and slate vanishes into a dark photo.
-          foregroundColor: Color.lerp(
-            Theme.of(context).colorScheme.onSurface,
-            Colors.white,
-            open,
-          ),
+          backgroundColor: Colors.transparent,
+          foregroundColor: scheme.onSurface,
+          // Status bar icons sit on the photo until the page covers it.
+          systemOverlayStyle: open > 0.5 || dark
+              ? SystemUiOverlayStyle.light
+              : SystemUiOverlayStyle.dark,
+          leading: back(overPhoto: open),
+          leadingWidth: 64,
+          actions: [bar(overPhoto: open), const SizedBox(width: 12)],
           flexibleSpace: Stack(
             fit: StackFit.expand,
             children: [
               FlexibleSpaceBar(
-                // No `title`. It used to sit here and get blurred away by the
-                // frost stacked above — the recipe's name is set in the page
-                // body now, where it can wrap instead of ellipsising.
+                // No `title`: the recipe's name is set in the page body, where
+                // it can wrap instead of ellipsising.
                 background: _HeroImage(
                   image: imageFor(winner, widget.store),
-                  accent: accent,
                   // The url that actually loaded, not the one ranked first.
                   credit: creditFor(winner),
                 ),
               ),
-              frostPane(context, opacity: 1 - open),
+              barPane(context, opacity: 1 - open),
             ],
           ),
-          actions: actions,
         );
       },
     );
   }
 }
 
-/// The photo, its wash, and the line saying where it came from.
+/// White over a photo, the page's wash once the page has covered it.
+class _Pill extends StatelessWidget {
+  /// 1 sitting on the photo, 0 on the plain bar; anything between while the
+  /// hero closes.
+  final double overPhoto;
+  final List<Widget> children;
+
+  const _Pill({required this.overPhoto, required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: ShapeDecoration(
+        shape: const StadiumBorder(),
+        color: Color.lerp(glassFill(context), scheme.surface, overPhoto),
+        shadows: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.14 * overPhoto),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: children),
+    );
+  }
+}
+
+/// The photo, a wash at its foot, and the line saying where it came from.
 class _HeroImage extends StatelessWidget {
   /// Null once every url has failed. The hero is on its way shut by then, so
   /// there is nothing to put in the picture's place.
   final ImageProvider? image;
-  final Color accent;
   final String? credit;
 
-  const _HeroImage({
-    required this.image,
-    required this.accent,
-    required this.credit,
-  });
+  const _HeroImage({required this.image, required this.credit});
 
   @override
   Widget build(BuildContext context) {
@@ -665,24 +686,16 @@ class _HeroImage extends StatelessWidget {
             // Deliberately no loadingBuilder. A spinner here is an indefinite
             // animation, and pumpAndSettle never returns on one (CLAUDE.md).
           ),
-        DecoratedBox(
-          decoration: BoxDecoration(gradient: heroScrim(context, accent)),
-        ),
+        const DecoratedBox(decoration: BoxDecoration(gradient: heroScrim)),
         if (credit case final credit?)
-          // The corner a photo credit belongs in. It had to clear the title
-          // above it once; nothing sits over the picture now but the toolbar.
-          Positioned(left: 16, right: 16, bottom: 16, child: _Credit(credit)),
+          Positioned(left: 16, right: 16, bottom: 14, child: _Credit(credit)),
       ],
     );
   }
 }
 
-/// Where the picture came from. Small, letterspaced and held back — this is
-/// attribution, and it answers "is this the dish, or a stock photo?" without
-/// competing with the title underneath it.
-///
-/// White in both themes: the scrim it sits on is deepened toward the page floor
-/// either way, so this is always ink on a dark ground.
+/// Where the picture came from. It answers "is this the dish, or a stock
+/// photo?" without competing with anything. White: it sits on the scrim.
 class _Credit extends StatelessWidget {
   final String text;
 
@@ -690,7 +703,7 @@ class _Credit extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ink = Colors.white.withValues(alpha: 0.78);
+    final ink = Colors.white.withValues(alpha: 0.85);
     return Row(
       children: [
         Icon(Icons.photo_camera_outlined, size: 13, color: ink),
@@ -710,14 +723,38 @@ class _Credit extends StatelessWidget {
   }
 }
 
-/// The recipe's headnote, printed above the ingredients the way a cookbook
+/// "bread · vegetarian · make-ahead", above the name. One Text per tag so
+/// each stays a word of its own for a screen reader.
+class _TagLine extends StatelessWidget {
+  final List<String> tags;
+
+  const _TagLine({required this.tags});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final style = weighted(theme.textTheme.labelMedium, FontWeight.w600)
+        ?.copyWith(color: theme.colorScheme.primary, letterSpacing: 1.1);
+    return Wrap(
+      runSpacing: 4,
+      children: [
+        for (final (index, tag) in tags.indexed) ...[
+          if (index > 0) Text('  ·  ', style: style),
+          Text(tag, style: style),
+        ],
+      ],
+    );
+  }
+}
+
+/// The recipe's headnote, printed above everything else the way a cookbook
 /// prints one: where the dish came from, when to make it, what can be swapped.
 ///
-/// Cut to [_maxLines] with a More button, because this sits above the servings
-/// stepper and a four-sentence note would otherwise push the first ingredients
-/// off a phone screen. The button appears only when the text is really
-/// clipped, which depends on the width it was given — so it is measured with a
-/// [TextPainter] at that width rather than guessed from the string's length.
+/// Cut to [_maxLines] with a More button, because a four-sentence note would
+/// otherwise push the servings and the first ingredients off a phone screen.
+/// The button appears only when the text is really clipped, which depends on
+/// the width it was given — so it is measured with a [TextPainter] at that
+/// width rather than guessed from the string's length.
 class _Headnote extends StatefulWidget {
   final String text;
 
@@ -734,7 +771,10 @@ class _HeadnoteState extends State<_Headnote> {
 
   @override
   Widget build(BuildContext context) {
-    final style = Theme.of(context).textTheme.bodyLarge;
+    final theme = Theme.of(context);
+    final style = serif(21, height: 1.32, italic: true).copyWith(
+      color: theme.colorScheme.onSurface.withValues(alpha: 0.86),
+    );
     return LayoutBuilder(
       builder: (context, constraints) {
         final painter = TextPainter(
@@ -759,12 +799,13 @@ class _HeadnoteState extends State<_Headnote> {
               overflow: cut ? TextOverflow.ellipsis : TextOverflow.clip,
             ),
             if (clipped)
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton(
-                  onPressed: () => setState(() => _expanded = !_expanded),
-                  child: Text(_expanded ? 'Less' : 'More'),
+              TextButton(
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(48, 40),
                 ),
+                onPressed: () => setState(() => _expanded = !_expanded),
+                child: Text(_expanded ? 'Less' : 'More'),
               ),
           ],
         );
@@ -773,18 +814,409 @@ class _HeadnoteState extends State<_Headnote> {
   }
 }
 
-/// The version's headline stars, "I made it", and its newest cooks — two of
-/// them, then a Show all, so a long log doesn't push the ingredients off a
-/// phone screen.
+/// The strip under the headnote: how many it serves (and the control that
+/// changes it), how long the timed steps add up to, and how it has gone.
+class _Facts extends StatelessWidget {
+  final int servings;
+  final ValueChanged<int> onServings;
+
+  /// Seconds across every timed step; 0 hides the cell.
+  final int timed;
+  final List<CookEntry> entries;
+
+  const _Facts({
+    required this.servings,
+    required this.onServings,
+    required this.timed,
+    required this.entries,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final rule = BorderSide(color: glassRim(context));
+    final stars = headlineStars(entries);
+    final label = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    final figure = serif(30, height: 1.2);
+
+    Widget cell(String name, Widget value) => Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(name, style: label),
+          SizedBox(height: 44, child: value),
+        ],
+      ),
+    );
+
+    Widget divider() => Container(
+      width: 1,
+      margin: const EdgeInsets.symmetric(horizontal: 14),
+      color: glassRim(context),
+    );
+
+    return DecoratedBox(
+      decoration: BoxDecoration(border: Border(top: rule, bottom: rule)),
+      // IntrinsicHeight so the dividers run the strip's full height.
+      child: IntrinsicHeight(
+        child: Row(
+          children: [
+            cell(
+              'Serves',
+              _Stepper(value: servings, onChanged: onServings),
+            ),
+            if (timed > 0) ...[
+              divider(),
+              Expanded(
+                child: cell(
+                  'Timed',
+                  // "2 h 30 min" is wider than a third of a phone at this
+                  // size; shrink it rather than wrap it out of the cell.
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(formatDuration(timed), style: figure),
+                  ),
+                ),
+              ),
+            ],
+            divider(),
+            Expanded(
+              child: cell(
+                entries.isEmpty
+                    ? 'Not made yet'
+                    : 'Made ${entries.length}×',
+                Row(
+                  children: [
+                    if (stars > 0) ...[
+                      Icon(
+                        Icons.star,
+                        size: 22,
+                        color: theme.colorScheme.primary,
+                      ),
+                      const SizedBox(width: 4),
+                      Text('$stars', style: figure),
+                    ] else
+                      Text('—', style: figure),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// − n +, with the number set as a figure. Shared by the servings on the page
+/// and the servings in the cook dialog.
+class _Stepper extends StatelessWidget {
+  final int value;
+  final ValueChanged<int> onChanged;
+
+  const _Stepper({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = Theme.of(context).colorScheme.primary;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          onPressed: value > 1 ? () => onChanged(value - 1) : null,
+          icon: const Icon(Icons.remove),
+          color: accent,
+          tooltip: 'Fewer',
+          visualDensity: VisualDensity.compact,
+        ),
+        ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 24),
+          child: Text(
+            '$value',
+            textAlign: TextAlign.center,
+            style: serif(30, height: 1.2),
+          ),
+        ),
+        IconButton(
+          onPressed: () => onChanged(value + 1),
+          icon: const Icon(Icons.add),
+          color: accent,
+          tooltip: 'More',
+          visualDensity: VisualDensity.compact,
+        ),
+      ],
+    );
+  }
+}
+
+/// One line of the mise en place: a tick for "it's out on the counter", then
+/// the amount and the name, which tap to switch units.
+class _IngredientRow extends StatelessWidget {
+  final Ingredient ingredient;
+  final String label;
+  final bool derived;
+  final bool ready;
+  final VoidCallback onTick;
+  final VoidCallback onSwitch;
+
+  const _IngredientRow({
+    required this.ingredient,
+    required this.label,
+    required this.derived,
+    required this.ready,
+    required this.onTick,
+    required this.onSwitch,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final ink = ready ? scheme.onSurfaceVariant : scheme.onSurface;
+    final decoration = ready ? TextDecoration.lineThrough : null;
+    // The amount column grows with the reader's text size, but never takes
+    // more than a third of the row from the name.
+    final amountWidth = MediaQuery.textScalerOf(context)
+        .scale(104)
+        .clamp(0.0, MediaQuery.sizeOf(context).width / 3);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: glassRim(context))),
+      ),
+      child: Row(
+        children: [
+          // Its own target, so ticking never switches units by accident.
+          Semantics(
+            checked: ready,
+            label: ingredient.name,
+            child: InkResponse(
+              onTap: onTick,
+              radius: 24,
+              child: SizedBox(
+                width: 44,
+                height: 52,
+                child: Center(
+                  child: AnimatedContainer(
+                    // Finite, and only on a tap.
+                    duration: const Duration(milliseconds: 120),
+                    width: 24,
+                    height: 24,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: ready ? scheme.primary : null,
+                      border: ready
+                          ? null
+                          : Border.all(color: scheme.outline, width: 1.5),
+                    ),
+                    child: ready
+                        ? Icon(Icons.check, size: 16, color: scheme.onPrimary)
+                        : null,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            // The whole rest of the line, not just the amount: a bare text run
+            // is a target too small for a hand that is also holding a bowl.
+            // InkWell rather than a GestureDetector so the row is reachable
+            // by keyboard and announced as a button. Every row taps, including
+            // the ones that can't switch; those answer with a SnackBar.
+            child: InkWell(
+              onTap: onSwitch,
+              borderRadius: BorderRadius.circular(8),
+              child: Ink(
+                // Marks an amount computed through a density, not one the
+                // reader tapped: a tap back onto the stored unit clears it, and
+                // the setting lights a whole recipe at once. Off once ticked —
+                // it is about measuring, and that one is measured.
+                decoration: BoxDecoration(
+                  color: derived && !ready ? herbWash(context) : null,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 52),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 8, 8, 8),
+                    child: Row(
+                      children: [
+                        SizedBox(
+                          width: amountWidth,
+                          child: _Amount(
+                            label: label,
+                            color: ready ? ink : scheme.primary,
+                            decoration: decoration,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            ingredient.name,
+                            style: theme.textTheme.bodyLarge?.copyWith(
+                              color: ink,
+                              decoration: decoration,
+                            ),
+                          ),
+                        ),
+                        if (canConvert(ingredient))
+                          Icon(
+                            Icons.swap_horiz,
+                            size: 18,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The signature: live scaling is what this app is for, so the amount wears
+/// the accent to mark it as the token the servings stepper moves.
+class _Amount extends StatelessWidget {
+  final String label;
+  final Color color;
+  final TextDecoration? decoration;
+
+  const _Amount({required this.label, required this.color, this.decoration});
+
+  @override
+  Widget build(BuildContext context) {
+    final reduced = MediaQuery.disableAnimationsOf(context);
+    return AnimatedSwitcher(
+      // Finite, and only ever triggered by the servings stepper. Anything that
+      // loops here would hang pumpAndSettle.
+      duration: reduced ? Duration.zero : const Duration(milliseconds: 180),
+      // Left-aligned in its column rather than centred, the default.
+      layoutBuilder: (current, previous) => Stack(
+        alignment: Alignment.centerLeft,
+        children: [...previous, ?current],
+      ),
+      child: Text(
+        label,
+        key: ValueKey(label),
+        style:
+            weighted(
+              Theme.of(context).textTheme.bodyLarge,
+              FontWeight.w600,
+            )?.copyWith(
+              color: color,
+              decoration: decoration,
+              // Numerals go monospaced, so an amount reads as a measured
+              // value rather than a word.
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
+      ),
+    );
+  }
+}
+
+class _StepRow extends StatelessWidget {
+  final int number;
+  final RecipeStep step;
+  final bool last;
+
+  /// The step's words with every `{0001}` already scaled and spelled out.
+  final String text;
+
+  const _StepRow({
+    required this.number,
+    required this.step,
+    required this.last,
+    required this.text,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      decoration: BoxDecoration(
+        border: last
+            ? null
+            : Border(bottom: BorderSide(color: glassRim(context))),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 34,
+            child: Text(
+              '$number',
+              style: serif(38, height: 0.95).copyWith(color: scheme.primary),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(step.title, style: theme.textTheme.titleMedium),
+                const SizedBox(height: 4),
+                Text(text, style: theme.textTheme.bodyLarge),
+                if (step.timerSeconds case final seconds?) ...[
+                  const SizedBox(height: 10),
+                  DecoratedBox(
+                    decoration: ShapeDecoration(
+                      shape: StadiumBorder(
+                        side: BorderSide(color: scheme.primary),
+                      ),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(10, 7, 14, 7),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.timer_outlined,
+                            size: 16,
+                            color: scheme.primary,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            formatDuration(seconds),
+                            style: weighted(
+                              theme.textTheme.bodyMedium,
+                              FontWeight.w600,
+                            )?.copyWith(color: scheme.primary),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The version's cooks, newest first — two of them, then a Show all — and the
+/// button that adds one. At the foot of the page, where you are when you have
+/// just finished making it.
 class _CookLog extends StatefulWidget {
   final List<CookEntry> entries;
-  final Color accent;
+  final String source;
   final VoidCallback onAdd;
   final ValueChanged<CookEntry> onEdit;
 
   const _CookLog({
     required this.entries,
-    required this.accent,
+    required this.source,
     required this.onAdd,
     required this.onEdit,
   });
@@ -800,34 +1232,83 @@ class _CookLogState extends State<_CookLog> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
     final entries = widget.entries;
-    final stars = headlineStars(entries);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            if (stars > 0) StarsRow(stars: stars, accent: widget.accent),
-            const Spacer(),
-            FilledButton.tonalIcon(
-              onPressed: widget.onAdd,
-              icon: const Icon(Icons.restaurant),
-              label: const Text('I made it'),
-            ),
-          ],
+    return ColoredBox(
+      color: glassFill(context),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.baseline,
+                textBaseline: TextBaseline.alphabetic,
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Cook log',
+                      style: theme.textTheme.headlineSmall,
+                    ),
+                  ),
+                  if (entries.isNotEmpty)
+                    Text(
+                      entries.length == 1
+                          ? 'Made once'
+                          : 'Made ${entries.length} times',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: muted,
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                entries.isEmpty
+                    ? 'Each time you make it, log how it went. The stars up '
+                          'top are the latest you gave.'
+                    : 'Your rating is the latest one you gave. Tap an entry '
+                          'to change it.',
+                style: theme.textTheme.bodySmall?.copyWith(color: muted),
+              ),
+              const SizedBox(height: 12),
+              for (final entry in _showAll
+                  ? entries
+                  : entries.take(_collapsed)) ...[
+                CookEntryLine(entry: entry, onTap: () => widget.onEdit(entry)),
+                const SizedBox(height: 8),
+              ],
+              if (entries.length > _collapsed)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton(
+                    onPressed: () => setState(() => _showAll = !_showAll),
+                    child: Text(
+                      _showAll ? 'Show less' : 'Show all (${entries.length})',
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 8),
+              FilledButton.icon(
+                onPressed: widget.onAdd,
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(54),
+                ),
+                icon: const Icon(Icons.restaurant),
+                label: const Text('I made it'),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Source: ${widget.source}',
+                style: theme.textTheme.bodySmall?.copyWith(color: muted),
+              ),
+            ],
+          ),
         ),
-        for (final entry in _showAll ? entries : entries.take(_collapsed))
-          CookEntryLine(
-            entry: entry,
-            accent: widget.accent,
-            onTap: () => widget.onEdit(entry),
-          ),
-        if (entries.length > _collapsed)
-          TextButton(
-            onPressed: () => setState(() => _showAll = !_showAll),
-            child: Text(_showAll ? 'Show less' : 'Show all (${entries.length})'),
-          ),
-      ],
+      ),
     );
   }
 }
@@ -863,6 +1344,17 @@ class _EntryDialogState extends State<_EntryDialog> {
   late int _stars = widget.entry.stars;
   late final _note = TextEditingController(text: widget.entry.note);
 
+  /// What each count of stars means, so the row reads as a verdict rather
+  /// than a score. Index 0 is no stars at all, which is allowed.
+  static const _verdicts = [
+    'Stars are optional',
+    'Didn’t work',
+    'Needs work',
+    'Fine',
+    'Really good',
+    'A keeper',
+  ];
+
   @override
   void dispose() {
     _note.dispose();
@@ -892,6 +1384,9 @@ class _EntryDialogState extends State<_EntryDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final label = theme.textTheme.bodySmall?.copyWith(color: muted);
     final note = _note.text.trim();
     // Nothing to keep: an empty entry isn't saved, the same rule a blank
     // rating had. Clearing an existing one is what Delete is for.
@@ -900,25 +1395,14 @@ class _EntryDialogState extends State<_EntryDialog> {
       // The default 40px a side leaves a 360dp phone too narrow for five
       // stars and the stepper; 16 is the app's usual gutter.
       insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-      title: Text(widget.isNew ? 'I made it' : 'Edit cook'),
+      title: Text(widget.isNew ? 'How did it go?' : 'Edit cook'),
       content: SizedBox(
         width: double.maxFinite,
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              TextButton.icon(
-                onPressed: _pickDate,
-                icon: const Icon(Icons.calendar_today, size: 18),
-                label: Text(formatDay(_date)),
-              ),
-              const SizedBox(height: 8),
-              _ServingsStepper(
-                servings: _servings ?? widget.fallbackServings,
-                onChanged: (value) => setState(() => _servings = value),
-              ),
-              const SizedBox(height: 8),
               // An equal share each rather than 48px each, so the row can't
               // be wider than the dialog however narrow the phone.
               Row(
@@ -930,22 +1414,64 @@ class _EntryDialogState extends State<_EntryDialog> {
                         // button.
                         onPressed: () =>
                             setState(() => _stars = _stars == star ? 0 : star),
+                        tooltip: star == 1 ? '1 star' : '$star stars',
+                        iconSize: 34,
                         icon: Icon(
                           star <= _stars ? Icons.star : Icons.star_border,
-                          color: star <= _stars ? widget.accent : null,
+                          color: star <= _stars ? widget.accent : muted,
                         ),
                       ),
                     ),
                 ],
               ),
-              const SizedBox(height: 8),
+              Text(
+                _verdicts[_stars],
+                textAlign: TextAlign.center,
+                style: serif(20, height: 1.3, italic: true).copyWith(
+                  color: _stars > 0 ? widget.accent : muted,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('When', style: label),
+                        const SizedBox(height: 4),
+                        TextButton.icon(
+                          style: TextButton.styleFrom(
+                            padding: EdgeInsets.zero,
+                            alignment: Alignment.centerLeft,
+                          ),
+                          onPressed: _pickDate,
+                          icon: const Icon(Icons.calendar_today, size: 18),
+                          label: Text(formatDay(_date)),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Served', style: label),
+                      _Stepper(
+                        value: _servings ?? widget.fallbackServings,
+                        onChanged: (value) => setState(() => _servings = value),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
               TextField(
                 controller: _note,
-                minLines: 1,
+                minLines: 2,
                 maxLines: 4,
                 decoration: const InputDecoration(
-                  labelText: 'Note',
-                  border: OutlineInputBorder(),
+                  hintText: 'Note for next time — what would you change?',
                 ),
                 onChanged: (_) => setState(() {}),
               ),
@@ -984,145 +1510,6 @@ class _EntryDialogState extends State<_EntryDialog> {
   }
 }
 
-class _ServingsStepper extends StatelessWidget {
-  final int servings;
-  final ValueChanged<int> onChanged;
-
-  const _ServingsStepper({required this.servings, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return GlassPanel(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
-        child: Row(
-          children: [
-            // Wraps rather than overflowing under a large system font.
-            Expanded(
-              child: Text('Servings', style: theme.textTheme.titleMedium),
-            ),
-            IconButton.outlined(
-              onPressed: servings > 1 ? () => onChanged(servings - 1) : null,
-              icon: const Icon(Icons.remove),
-            ),
-            SizedBox(
-              width: 48,
-              child: Text(
-                '$servings',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.titleLarge,
-              ),
-            ),
-            IconButton.outlined(
-              onPressed: () => onChanged(servings + 1),
-              icon: const Icon(Icons.add),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// The signature: live scaling is what this app is for, so the amount wears the
-/// recipe's own accent — the same light the stars and step numbers carry — to
-/// mark it as the token the servings stepper moves.
-class _Amount extends StatelessWidget {
-  final String label;
-  final Color accent;
-
-  const _Amount({required this.label, required this.accent});
-
-  @override
-  Widget build(BuildContext context) {
-    final reduced = MediaQuery.disableAnimationsOf(context);
-    return AnimatedSwitcher(
-      // Finite, and only ever triggered by the servings stepper. Anything that
-      // loops here would hang pumpAndSettle.
-      duration: reduced ? Duration.zero : const Duration(milliseconds: 180),
-      child: Text(
-        label,
-        key: ValueKey(label),
-        style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-          color: accent,
-          // Weight carries the same signal as the colour, for anyone who
-          // can't separate the accent hue from the body ink.
-          fontWeight: FontWeight.w600,
-          // Numerals go monospaced, so an amount reads as a measured value
-          // rather than a word — the distinction the fill used to make.
-          fontFeatures: const [FontFeature.tabularFigures()],
-        ),
-      ),
-    );
-  }
-}
-
-class _StepCard extends StatelessWidget {
-  final int number;
-  final RecipeStep step;
-  final Recipe recipe;
-  final double factor;
-  final Set<String> flipped;
-  final Color accent;
-
-  const _StepCard({
-    required this.number,
-    required this.step,
-    required this.recipe,
-    required this.factor,
-    required this.flipped,
-    required this.accent,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return GlassPanel(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                CircleAvatar(
-                  radius: 14,
-                  backgroundColor: accent,
-                  child: Text(
-                    '$number',
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w700,
-                      color: onAccent(accent),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(step.title, style: theme.textTheme.titleMedium),
-                ),
-                if (step.timerSeconds case final seconds?)
-                  Chip(
-                    avatar: const Icon(Icons.timer_outlined, size: 16),
-                    label: Text(formatDuration(seconds)),
-                    visualDensity: VisualDensity.compact,
-                  ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              renderContent(step, recipe, factor, flipped: flipped),
-              style: theme.textTheme.bodyLarge,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 /// What [_PhotoSheet] returns for "use my own photo", rather than a url. It
 /// cannot collide with a real one: nothing names a file `pick`.
 const _ownPhoto = 'mise://pick';
@@ -1144,81 +1531,77 @@ class _PhotoSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return SafeArea(
-      child: GlassPanel(
-        margin: const EdgeInsets.all(12),
-        // Opaque, unlike every other panel. Their translucent fill is tuned
-        // for the plain page backdrop; a sheet sits on top of the recipe's
-        // photo and text, and at 8% in the dark theme that read straight
-        // through.
-        fill: theme.colorScheme.surface,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Choose a photo', style: theme.textTheme.titleMedium),
-              const SizedBox(height: 12),
-              // First, and outside the grid: the one photo that cannot 404 and
-              // the only one that is actually of this dish rather than of
-              // something that looks like it.
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.photo_camera_outlined),
-                title: const Text('Use my own photo'),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(pillRadius),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('Choose a photo', style: theme.textTheme.headlineSmall),
+            const SizedBox(height: 12),
+            if (photos.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                child: Text(
+                  'No photos found. Edit the recipe and describe what it '
+                  'looks like in two or three words.',
+                  style: theme.textTheme.bodyMedium,
                 ),
-                onTap: () => Navigator.pop(context, _ownPhoto),
-              ),
-              if (photos.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 24),
-                  child: Text(
-                    'No photos found. Edit the recipe and describe what it '
-                    'looks like in two or three words.',
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                )
-              else ...[
-                const SizedBox(height: 8),
-                ConstrainedBox(
-                  // Half the screen, so the sheet stays a sheet: the grid
-                  // scrolls inside it rather than growing into a full page.
-                  constraints: BoxConstraints(
-                    maxHeight: MediaQuery.sizeOf(context).height * 0.5,
-                  ),
-                  child: GridView.count(
-                    crossAxisCount: 3,
-                    shrinkWrap: true,
-                    mainAxisSpacing: 8,
-                    crossAxisSpacing: 8,
-                    children: [
-                      for (final url in photos)
-                        InkWell(
-                          onTap: () => Navigator.pop(context, url),
-                          borderRadius: BorderRadius.circular(pillRadius),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(pillRadius),
-                            child: Image(
-                              // Through the chokepoint, so a tile and the hero
-                              // can never disagree about what a url paints as.
-                              image: imageFor(url, store)!,
-                              fit: BoxFit.cover,
-                              // No loadingBuilder — see the class docs.
-                              errorBuilder: (_, _, _) =>
-                                  ColoredBox(color: glassFill(context)),
-                            ),
+              )
+            else ...[
+              ConstrainedBox(
+                // Half the screen, so the sheet stays a sheet: the grid
+                // scrolls inside it rather than growing into a full page.
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.sizeOf(context).height * 0.5,
+                ),
+                child: GridView.count(
+                  crossAxisCount: 3,
+                  shrinkWrap: true,
+                  mainAxisSpacing: 6,
+                  crossAxisSpacing: 6,
+                  children: [
+                    for (final url in photos)
+                      InkWell(
+                        onTap: () => Navigator.pop(context, url),
+                        borderRadius: BorderRadius.circular(12),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Image(
+                            // Through the chokepoint, so a tile and the hero
+                            // can never disagree about what a url paints as.
+                            image: imageFor(url, store)!,
+                            fit: BoxFit.cover,
+                            // No loadingBuilder — see the class docs.
+                            errorBuilder: (_, _, _) =>
+                                ColoredBox(color: glassFill(context)),
                           ),
                         ),
-                    ],
-                  ),
+                      ),
+                  ],
                 ),
-                const SizedBox(height: 8),
-                Text('Photos from Pexels', style: theme.textTheme.labelSmall),
-              ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Photos from Pexels',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
             ],
-          ),
+            const SizedBox(height: 14),
+            // The one photo that cannot 404, and the only one that is actually
+            // of this dish rather than of something that looks like it.
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size.fromHeight(52),
+                side: BorderSide(color: glassRim(context)),
+              ),
+              onPressed: () => Navigator.pop(context, _ownPhoto),
+              icon: const Icon(Icons.photo_camera_outlined),
+              label: const Text('Use my own photo'),
+            ),
+          ],
         ),
       ),
     );

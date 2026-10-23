@@ -262,6 +262,13 @@ class RecipeStore {
   Future<List<CookEntry>> entries(String id) async =>
       [...?(await _log())[id]]..sort((a, b) => b.date.compareTo(a.date));
 
+  /// Every version's log, each newest first: one read for a whole library,
+  /// where [entries] per recipe would be one read per row.
+  Future<Map<String, List<CookEntry>>> allEntries() async => {
+    for (final MapEntry(key: id, value: log) in (await _log()).entries)
+      id: [...log]..sort((a, b) => b.date.compareTo(a.date)),
+  };
+
   /// Adds [entry] to version [id]'s log, or replaces the one with its id.
   Future<void> saveEntry(String id, CookEntry entry) async {
     final log = await _log();

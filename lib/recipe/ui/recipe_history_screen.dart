@@ -171,7 +171,7 @@ class _VersionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final accent = tagAccent(context, version.saved.$2.tags);
+    final accent = theme.colorScheme.primary;
     final entries = version.entries;
 
     return GlassPanel(
