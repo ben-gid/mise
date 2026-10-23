@@ -224,34 +224,116 @@ void main() {
     expect((await store.history(id)).map((s) => s.$1), [id]);
   });
 
-  test('a rating round-trips', () async {
+  CookEntry entry(
+    String id,
+    DateTime date, {
+    int? servings = 4,
+    int stars = 0,
+    String note = '',
+  }) => (id: id, date: date, servings: servings, stars: stars, note: note);
+
+  test('a cook entry round-trips', () async {
     final id = await store.save(parser.parse(validJson));
-
-    await store.setRating(id, (stars: 4, note: 'Halve the garlic next time'));
-
-    expect(await store.rating(id), (
+    final cooked = entry(
+      'a',
+      DateTime(2026, 10, 3, 19),
+      servings: 6,
       stars: 4,
       note: 'Halve the garlic next time',
-    ));
+    );
+
+    await store.saveEntry(id, cooked);
+
+    expect(await store.entries(id), [cooked]);
+    // On disk in UTC, so the moment survives a change of timezone.
+    final onDisk = File('${dir.path}/ratings.meta').readAsStringSync();
+    expect(onDisk, contains(cooked.date.toUtc().toIso8601String()));
   });
 
-  test('an unrated recipe has no rating', () async {
+  test('a date saved without an offset still reads as local time', () async {
     final id = await store.save(parser.parse(validJson));
-    expect(await store.rating(id), isNull);
+    File('${dir.path}/ratings.meta').writeAsStringSync(
+      jsonEncode({
+        id: [
+          {
+            'id': 'a',
+            'date': '2026-10-22T15:32:59.325',
+            'servings': 6,
+            'stars': 5,
+            'note': '',
+          },
+        ],
+      }),
+    );
+
+    expect(
+      (await store.entries(id)).single.date,
+      DateTime(2026, 10, 22, 15, 32, 59, 325),
+    );
   });
 
-  test('an empty rating is removed rather than stored blank', () async {
+  test('a never-cooked recipe has no entries', () async {
     final id = await store.save(parser.parse(validJson));
-
-    await store.setRating(id, (stars: 3, note: 'meh'));
-    await store.setRating(id, (stars: 0, note: ''));
-
-    expect(await store.rating(id), isNull);
+    expect(await store.entries(id), isEmpty);
   });
 
-  test('ratings live beside the recipes without disturbing loadAll', () async {
+  test('saving an entry under an existing id replaces it', () async {
     final id = await store.save(parser.parse(validJson));
-    await store.setRating(id, (stars: 5, note: 'keeper'));
+    await store.saveEntry(id, entry('a', DateTime(2026, 10, 3), stars: 2));
+
+    await store.saveEntry(id, entry('a', DateTime(2026, 10, 3), stars: 5));
+
+    expect((await store.entries(id)).single.stars, 5);
+  });
+
+  test('entries come back newest first', () async {
+    final id = await store.save(parser.parse(validJson));
+    await store.saveEntry(id, entry('old', DateTime(2026, 10, 3)));
+    await store.saveEntry(id, entry('new', DateTime(2026, 10, 17)));
+    await store.saveEntry(id, entry('mid', DateTime(2026, 10, 10)));
+
+    expect((await store.entries(id)).map((e) => e.id), ['new', 'mid', 'old']);
+  });
+
+  test('deleting the last entry removes the recipe from the log', () async {
+    final id = await store.save(parser.parse(validJson));
+    await store.saveEntry(id, entry('a', DateTime(2026, 10, 3)));
+    await store.saveEntry(id, entry('b', DateTime(2026, 10, 4)));
+
+    await store.deleteEntry(id, 'a');
+    expect((await store.entries(id)).map((e) => e.id), ['b']);
+
+    await store.deleteEntry(id, 'b');
+    expect(await store.entries(id), isEmpty);
+    // No empty list left behind for the id.
+    final onDisk = File('${dir.path}/ratings.meta').readAsStringSync();
+    expect(jsonDecode(onDisk), isEmpty);
+  });
+
+  test('an old single rating reads as one entry from the version', () async {
+    final id = await store.save(parser.parse(validJson));
+    File('${dir.path}/ratings.meta').writeAsStringSync(
+      jsonEncode({
+        id: {'stars': 4, 'note': 'crisp'},
+      }),
+    );
+
+    // Dated from the version itself: the id starts with its createdAt.
+    final created = DateTime.fromMillisecondsSinceEpoch(
+      int.parse(id.split('-').first),
+    );
+    expect(await store.entries(id), [
+      entry('legacy', created, servings: null, stars: 4, note: 'crisp'),
+    ]);
+
+    // ...and survives the first write in the new shape.
+    await store.saveEntry(id, entry('b', created.add(const Duration(days: 1))));
+    expect((await store.entries(id)).map((e) => e.id), ['b', 'legacy']);
+  });
+
+  test('entries live beside the recipes without disturbing loadAll', () async {
+    final id = await store.save(parser.parse(validJson));
+    await store.saveEntry(id, entry('a', DateTime(2026, 10, 3), stars: 5));
 
     // The sidecar is not a .json file, so loadAll never tries to read it as a
     // recipe — and the recipe file itself stays schema-valid.
@@ -260,16 +342,32 @@ void main() {
     expect(() => parser.parse(onDisk), returnsNormally);
   });
 
-  test('a corrupt ratings file loses ratings, not recipes', () async {
+  test('a corrupt log file loses entries, not recipes', () async {
     final id = await store.save(parser.parse(validJson));
     File('${dir.path}/ratings.meta').writeAsStringSync('{"broken": ');
 
     expect((await store.loadAll()).single.$1, id);
-    expect(await store.rating(id), isNull);
+    expect(await store.entries(id), isEmpty);
 
     // ...and the next write starts a clean file rather than failing forever.
-    await store.setRating(id, (stars: 1, note: ''));
-    expect(await store.rating(id), (stars: 1, note: ''));
+    final cooked = entry('a', DateTime(2026, 10, 3), stars: 1);
+    await store.saveEntry(id, cooked);
+    expect(await store.entries(id), [cooked]);
+  });
+
+  test('the headline is the newest entry that has stars', () {
+    expect(headlineStars([]), 0);
+    expect(
+      headlineStars([
+        // Newest first, as entries() returns them. A note-only cook doesn't
+        // reset the verdict.
+        entry('c', DateTime(2026, 10, 20), note: 'out of thyme'),
+        entry('b', DateTime(2026, 10, 17), stars: 5),
+        entry('a', DateTime(2026, 10, 3), stars: 3),
+      ]),
+      5,
+    );
+    expect(headlineStars([entry('a', DateTime(2026, 10, 3))]), 0);
   });
 
   test('the theme survives a restart and is not read as a recipe', () async {

@@ -8,8 +8,10 @@ import 'package:mise/recipe/recipe_image.dart';
 import 'package:mise/recipe/recipe_parser.dart';
 import 'package:mise/recipe/recipe_store.dart';
 import 'package:mise/recipe/recipe_units.dart';
+import 'package:mise/recipe/ui/cook_log.dart';
 import 'package:mise/recipe/ui/recipe_detail_screen.dart';
 import 'package:mise/recipe/ui/recipe_list_screen.dart';
+import 'package:mise/recipe/ui/settings_screen.dart';
 
 /// `testWidgets` runs in a fake-async zone, so real dart:io futures never
 /// complete inside it — anything that touches [RecipeStore] has to run under
@@ -174,18 +176,35 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  /// Pumps the detail screen and lets its real rating read finish.
+  /// One cook, dated [day]s into October so tests can order several.
+  CookEntry cooked({int day = 3, int stars = 0, String note = ''}) => (
+    id: 'e$day',
+    date: DateTime(2026, 10, day, 19),
+    servings: 4,
+    stars: stars,
+    note: note,
+  );
+
+  /// Pumps the detail screen and lets its real cook-log read finish.
   ///
   /// The recipe itself is passed in, so the body renders on the first frame;
-  /// only the rating arrives asynchronously. Pass [ready] when the test depends
-  /// on that rating having landed.
+  /// only the log arrives asynchronously. Pass [ready] when the test depends
+  /// on those entries having landed.
+  ///
+  /// [seed] runs against the saved id before the screen opens — under the
+  /// real clock, since the store is real `dart:io`.
   Future<String> pumpDetail(
     WidgetTester tester, {
     bool Function()? ready,
     String? json,
+    Future<void> Function(String id)? seed,
   }) async {
     final body = json ?? validJson;
-    final id = (await tester.runAsync(() => store.save(parser.parse(body))))!;
+    final id = (await tester.runAsync(() async {
+      final id = await store.save(parser.parse(body));
+      await seed?.call(id);
+      return id;
+    }))!;
     await tester.runAsync(() async {
       await tester.pumpWidget(
         MaterialApp(
@@ -287,7 +306,7 @@ void main() {
     );
     final expectedId = (await tester.runAsync(() async {
       final id = await store.save(recipe);
-      await store.setRating(id, (stars: 4, note: 'crisp'));
+      await store.saveEntry(id, cooked(stars: 4, note: 'crisp'));
       return id;
     }))!;
 
@@ -304,12 +323,12 @@ void main() {
 
     expect(id, expectedId);
     expect(onDisk().imageUrls, ['mise://found.png']);
-    // Same id, so the rating stays attached and nothing lands in history —
+    // Same id, so the cook log stays attached and nothing lands in history —
     // the two things a trip through saveVersion would have broken.
-    final (rating, history) = (await tester.runAsync(
-      () async => (await store.rating(id), await store.history(id)),
+    final (entries, history) = (await tester.runAsync(
+      () async => (await store.entries(id), await store.history(id)),
     ))!;
-    expect(rating?.stars, 4);
+    expect(headlineStars(entries), 4);
     expect(history, hasLength(1));
   });
 
@@ -327,7 +346,7 @@ void main() {
         'rustic focaccia bread': ['mise://other.png'],
       },
     );
-    await tester.runAsync(() => store.setRating(id, (stars: 5, note: '')));
+    await tester.runAsync(() => store.saveEntry(id, cooked(stars: 5)));
 
     // Tapped under the real clock: the picker awaits the search before the
     // sheet opens, and that Future was made there.
@@ -353,10 +372,10 @@ void main() {
     );
 
     expect(onDisk().imageUrls, ['mise://other.png']);
-    final (rating, history) = (await tester.runAsync(
-      () async => (await store.rating(id), await store.history(id)),
+    final (entries, history) = (await tester.runAsync(
+      () async => (await store.entries(id), await store.history(id)),
     ))!;
-    expect(rating?.stars, 5);
+    expect(headlineStars(entries), 5);
     expect(history, hasLength(1));
   });
 
@@ -534,7 +553,7 @@ void main() {
     expect(find.text('5'), findsWidgets);
 
     // ...and in the step body, which is below the fold in a test viewport.
-    // .first is the page ListView; the note TextField is a Scrollable too.
+    // .first is the page's scroll view.
     await tester.scrollUntilVisible(
       find.text('Mix the dough'),
       200,
@@ -1070,29 +1089,112 @@ void main() {
     expect(find.text('step 1 \u00b7 wording'), findsOneWidget);
   });
 
-  testWidgets('a rating and note survive reopening the recipe', (tester) async {
+  /// The detail screen's cook log rows — distinct from the entry dialog, whose
+  /// note field holds the same text while it closes.
+  final logRows = find.byType(CookEntryLine);
+
+  testWidgets('a cook logged with I made it survives reopening the recipe', (
+    tester,
+  ) async {
+    tallSurface(tester);
     await pumpDetail(tester);
 
+    // Two up from the fixture's 4: the entry records the servings on screen.
+    // A frame between taps: the button's closure captures the servings it
+    // was built with, so two taps in one frame land on 5.
+    await tester.tap(find.byIcon(Icons.add));
+    await tester.pump();
+    await tester.tap(find.byIcon(Icons.add));
+    await tester.pump();
+    await tester.tap(find.text('I made it'));
+    await tester.pumpAndSettle();
+
+    final dialog = find.byType(AlertDialog);
+    expect(
+      find.descendant(of: dialog, matching: find.text('6')),
+      findsOneWidget,
+    );
+    await tester.tap(
+      find.descendant(of: dialog, matching: find.byIcon(Icons.star_border)).at(3),
+    );
+    await tester.enterText(
+      find.descendant(of: dialog, matching: find.byType(TextField)),
+      'Halve the garlic',
+    );
+    await tester.pump();
     await tester.runAsync(() async {
-      await tester.tap(find.byIcon(Icons.star_border).at(3)); // 4th star
-      await tester.pump();
-      await tester.enterText(
-        find.widgetWithText(TextField, 'My note'),
-        'Halve the garlic',
-      );
-      await Future<void>.delayed(const Duration(milliseconds: 50));
+      await tester.tap(find.widgetWithText(FilledButton, 'Save'));
+      // The row, not the text: the closing dialog's field still holds it.
+      await pumpUntil(tester, () => logRows.evaluate().length == 1);
     });
     await tester.pumpAndSettle();
 
-    expect(find.byIcon(Icons.star), findsNWidgets(4));
+    expect(find.textContaining('for 6'), findsOneWidget);
 
-    // Reopen from disk, waiting for the stored rating rather than just the body.
+    // Reopen from disk, waiting for the stored entry rather than just the body.
     await pumpDetail(
       tester,
-      ready: () => find.byIcon(Icons.star).evaluate().length == 4,
+      ready: () => find.text('Halve the garlic').evaluate().isNotEmpty,
     );
 
-    expect(find.byIcon(Icons.star), findsNWidgets(4));
-    expect(find.text('Halve the garlic'), findsOneWidget);
+    expect(find.textContaining('for 6'), findsOneWidget);
+    // The headline's four and the entry's own four.
+    expect(find.byIcon(Icons.star), findsNWidgets(8));
+  });
+
+  testWidgets('an entry can be deleted from its dialog', (tester) async {
+    tallSurface(tester);
+    await pumpDetail(
+      tester,
+      ready: () => find.text('crisp').evaluate().isNotEmpty,
+      seed: (id) => store.saveEntry(id, cooked(stars: 4, note: 'crisp')),
+    );
+
+    await tester.tap(find.text('crisp'));
+    await tester.pumpAndSettle();
+    await tester.runAsync(() async {
+      await tester.tap(find.widgetWithText(TextButton, 'Delete'));
+      await pumpUntil(tester, () => logRows.evaluate().isEmpty);
+    });
+    await tester.pumpAndSettle();
+
+    expect(find.text('crisp'), findsNothing);
+    expect(find.byIcon(Icons.star), findsNothing);
+  });
+
+  testWidgets('a long log shows the newest two until Show all', (
+    tester,
+  ) async {
+    tallSurface(tester);
+    await pumpDetail(
+      tester,
+      ready: () => find.text('third').evaluate().isNotEmpty,
+      seed: (id) async {
+        await store.saveEntry(id, cooked(day: 1, note: 'first'));
+        await store.saveEntry(id, cooked(day: 2, note: 'second'));
+        await store.saveEntry(id, cooked(day: 3, note: 'third'));
+      },
+    );
+
+    expect(find.text('third'), findsOneWidget);
+    expect(find.text('second'), findsOneWidget);
+    expect(find.text('first'), findsNothing);
+
+    await tester.tap(find.text('Show all (3)'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('first'), findsOneWidget);
+  });
+
+  testWidgets('Settings has no account panel in a build without accounts', (
+    tester,
+  ) async {
+    tallSurface(tester);
+    await tester.pumpWidget(MaterialApp(home: SettingsScreen(store: store)));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Measure by'), findsOneWidget);
+    expect(find.text('Account'), findsNothing);
+    expect(find.text('Continue with Google'), findsNothing);
   });
 }

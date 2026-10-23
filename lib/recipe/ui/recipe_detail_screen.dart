@@ -7,6 +7,7 @@ import '../recipe_models.dart';
 import '../recipe_parser.dart';
 import '../recipe_scaling.dart';
 import '../recipe_store.dart';
+import 'cook_log.dart';
 import 'glass.dart';
 import 'recipe_edit_screen.dart';
 import 'recipe_history_screen.dart';
@@ -45,8 +46,9 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
   /// Ingredients tapped into their other dimension. Deliberately not
   /// persisted — this is "my scale is dirty, show me cups", not a preference.
   final _flipped = <String>{};
-  final _noteController = TextEditingController();
-  int _stars = 0;
+
+  /// Every time this version was cooked, newest first.
+  List<CookEntry> _entries = const [];
 
   /// The recipe's photos, tried in order until one loads. Null until the first
   /// [didChangeDependencies], which is the earliest an ImageConfiguration
@@ -75,13 +77,44 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
   @override
   void initState() {
     super.initState();
-    // Unrated is the default state, so there is nothing to show while this
-    // resolves — no spinner, which would hang pumpAndSettle.
-    widget.store.rating(_id).then((rating) {
-      if (rating == null || !mounted) return;
-      setState(() => _stars = rating.stars);
-      _noteController.text = rating.note;
-    });
+    // Never cooked is the default state, so there is nothing to show while
+    // this resolves — no spinner, which would hang pumpAndSettle.
+    _loadEntries();
+  }
+
+  Future<void> _loadEntries() async {
+    final entries = await widget.store.entries(_id);
+    if (mounted) setState(() => _entries = entries);
+  }
+
+  /// Opens the entry dialog: a new cook for [existing] null, prefilled with
+  /// today and the servings on screen, otherwise that entry to edit or delete.
+  Future<void> _logCook([CookEntry? existing]) async {
+    final now = DateTime.now();
+    final result = await showDialog<_EntryResult>(
+      context: context,
+      builder: (_) => _EntryDialog(
+        entry:
+            existing ??
+            (
+              id: now.microsecondsSinceEpoch.toString(),
+              date: now,
+              servings: _servings,
+              stars: 0,
+              note: '',
+            ),
+        isNew: existing == null,
+        fallbackServings: _recipe.baseServings,
+        accent: tagAccent(context, _recipe.tags),
+      ),
+    );
+    if (result == null) return;
+    if (result.delete) {
+      await widget.store.deleteEntry(_id, result.entry.id);
+    } else {
+      await widget.store.saveEntry(_id, result.entry);
+    }
+    await _loadEntries();
   }
 
   @override
@@ -160,12 +193,12 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
   ///
   /// [RecipeStore.save] and not `saveVersion`: the id is
   /// `<createdAtMillis>-<title-slug>` and neither half moves here, so this
-  /// rewrites the same file under the same id. That is what keeps the rating
-  /// attached — ratings are keyed by id — and what keeps "I picked a nicer
+  /// rewrites the same file under the same id. That is what keeps the cook log
+  /// attached — it is keyed by id — and what keeps "I picked a nicer
   /// picture" out of the version history, where it would sit between two real
   /// edits pretending to be one.
   ///
-  /// And deliberately not [_adopt], which clears the stars. [_adopt] is right
+  /// And deliberately not [_adopt], which clears the log. [_adopt] is right
   /// to: every path into it mints a new id, and leaving five stars on a version
   /// nobody has cooked would be a lie. Here there is no new version to lie
   /// about.
@@ -236,16 +269,15 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
     });
   }
 
-  /// Shows [saved] as the current version. The rating is cleared rather than
-  /// carried over: versions are rated independently, so leaving the old stars
-  /// on screen would imply this version had already been cooked.
+  /// Shows [saved] as the current version. The cook log is cleared rather than
+  /// carried over: each version keeps its own, so leaving the old entries on
+  /// screen would imply this version had already been cooked.
   void _adopt(SavedRecipe saved) {
     setState(() {
       _id = saved.$1;
       _recipe = saved.$2;
-      _stars = 0;
+      _entries = const [];
     });
-    _noteController.clear();
     _startPhotos();
   }
 
@@ -281,16 +313,9 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
 
   @override
   void dispose() {
-    _noteController.dispose();
     _photos?.dispose();
     _close.dispose();
     super.dispose();
-  }
-
-  // ponytail: rewrites the whole ratings map per keystroke; debounce if that
-  // file ever gets big.
-  void _save() {
-    widget.store.setRating(_id, (stars: _stars, note: _noteController.text));
   }
 
   /// Native share sheet, carrying the recipe scaled to the servings on screen.
@@ -365,31 +390,11 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
                     onChanged: (value) => setState(() => _servings = value),
                   ),
                   const SizedBox(height: 24),
-                  Row(
-                    children: [
-                      for (var star = 1; star <= 5; star++)
-                        IconButton(
-                          // Tapping the current rating clears it — no extra button.
-                          onPressed: () {
-                            setState(() => _stars = _stars == star ? 0 : star);
-                            _save();
-                          },
-                          icon: Icon(
-                            star <= _stars ? Icons.star : Icons.star_border,
-                            color: star <= _stars ? accent : null,
-                          ),
-                        ),
-                    ],
-                  ),
-                  TextField(
-                    controller: _noteController,
-                    minLines: 1,
-                    maxLines: 3,
-                    decoration: const InputDecoration(
-                      labelText: 'My note',
-                      border: OutlineInputBorder(),
-                    ),
-                    onChanged: (_) => _save(),
+                  _CookLog(
+                    entries: _entries,
+                    accent: accent,
+                    onAdd: _logCook,
+                    onEdit: _logCook,
                   ),
                   const SizedBox(height: 24),
                   Text('Ingredients', style: theme.textTheme.titleLarge),
@@ -747,6 +752,210 @@ class _HeadnoteState extends State<_Headnote> {
           ],
         );
       },
+    );
+  }
+}
+
+/// The version's headline stars, "I made it", and its newest cooks — two of
+/// them, then a Show all, so a long log doesn't push the ingredients off a
+/// phone screen.
+class _CookLog extends StatefulWidget {
+  final List<CookEntry> entries;
+  final Color accent;
+  final VoidCallback onAdd;
+  final ValueChanged<CookEntry> onEdit;
+
+  const _CookLog({
+    required this.entries,
+    required this.accent,
+    required this.onAdd,
+    required this.onEdit,
+  });
+
+  @override
+  State<_CookLog> createState() => _CookLogState();
+}
+
+class _CookLogState extends State<_CookLog> {
+  static const _collapsed = 2;
+
+  bool _showAll = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final entries = widget.entries;
+    final stars = headlineStars(entries);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            if (stars > 0) StarsRow(stars: stars, accent: widget.accent),
+            const Spacer(),
+            FilledButton.tonalIcon(
+              onPressed: widget.onAdd,
+              icon: const Icon(Icons.restaurant),
+              label: const Text('I made it'),
+            ),
+          ],
+        ),
+        for (final entry in _showAll ? entries : entries.take(_collapsed))
+          CookEntryLine(
+            entry: entry,
+            accent: widget.accent,
+            onTap: () => widget.onEdit(entry),
+          ),
+        if (entries.length > _collapsed)
+          TextButton(
+            onPressed: () => setState(() => _showAll = !_showAll),
+            child: Text(_showAll ? 'Show less' : 'Show all (${entries.length})'),
+          ),
+      ],
+    );
+  }
+}
+
+/// What [_EntryDialog] pops with: the entry to save, or to delete.
+typedef _EntryResult = ({CookEntry entry, bool delete});
+
+/// One cook, new or being edited. A dialog rather than a bottom sheet: the
+/// photo picker is the app's one sheet, and this is four small fields.
+class _EntryDialog extends StatefulWidget {
+  final CookEntry entry;
+  final bool isNew;
+
+  /// What the stepper shows for an entry migrated without servings. Left
+  /// untouched, the entry stays without them rather than claiming a number.
+  final int fallbackServings;
+  final Color accent;
+
+  const _EntryDialog({
+    required this.entry,
+    required this.isNew,
+    required this.fallbackServings,
+    required this.accent,
+  });
+
+  @override
+  State<_EntryDialog> createState() => _EntryDialogState();
+}
+
+class _EntryDialogState extends State<_EntryDialog> {
+  late DateTime _date = widget.entry.date;
+  late int? _servings = widget.entry.servings;
+  late int _stars = widget.entry.stars;
+  late final _note = TextEditingController(text: widget.entry.note);
+
+  @override
+  void dispose() {
+    _note.dispose();
+    super.dispose();
+  }
+
+  /// A cook logged the morning after is still last night's. The time of day
+  /// is kept so two cooks on one day stay in order.
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _date,
+      firstDate: DateTime(2000),
+      lastDate: DateTime.now(),
+    );
+    if (picked == null) return;
+    setState(() {
+      _date = DateTime(
+        picked.year,
+        picked.month,
+        picked.day,
+        _date.hour,
+        _date.minute,
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final note = _note.text.trim();
+    // Nothing to keep: an empty entry isn't saved, the same rule a blank
+    // rating had. Clearing an existing one is what Delete is for.
+    final canSave = _stars > 0 || note.isNotEmpty;
+    return AlertDialog(
+      title: Text(widget.isNew ? 'I made it' : 'Edit cook'),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextButton.icon(
+                onPressed: _pickDate,
+                icon: const Icon(Icons.calendar_today, size: 18),
+                label: Text(formatDay(_date)),
+              ),
+              const SizedBox(height: 8),
+              _ServingsStepper(
+                servings: _servings ?? widget.fallbackServings,
+                onChanged: (value) => setState(() => _servings = value),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  for (var star = 1; star <= 5; star++)
+                    IconButton(
+                      // Tapping the current rating clears it — no extra button.
+                      onPressed: () =>
+                          setState(() => _stars = _stars == star ? 0 : star),
+                      icon: Icon(
+                        star <= _stars ? Icons.star : Icons.star_border,
+                        color: star <= _stars ? widget.accent : null,
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _note,
+                minLines: 1,
+                maxLines: 4,
+                decoration: const InputDecoration(
+                  labelText: 'Note',
+                  border: OutlineInputBorder(),
+                ),
+                onChanged: (_) => setState(() {}),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        if (!widget.isNew)
+          TextButton(
+            onPressed: () =>
+                Navigator.pop(context, (entry: widget.entry, delete: true)),
+            child: const Text('Delete'),
+          ),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: canSave
+              ? () => Navigator.pop(context, (
+                  entry: (
+                    id: widget.entry.id,
+                    date: _date,
+                    servings: _servings,
+                    stars: _stars,
+                    note: note,
+                  ),
+                  delete: false,
+                ))
+              : null,
+          child: const Text('Save'),
+        ),
+      ],
     );
   }
 }

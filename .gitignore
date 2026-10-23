@@ -52,3 +52,6 @@ env.json
 __pycache__/
 .pytest_cache/
 server/.env
+
+# Supabase CLI link state, per machine
+supabase/.temp/

@@ -11,10 +11,26 @@ import 'recipe_models.dart';
 /// filename is the id.
 typedef SavedRecipe = (String id, Recipe recipe);
 
-/// What the user thought of a recipe after cooking it. Kept out of [Recipe] on
+/// One time a version was cooked, and how it went. Kept out of [Recipe] on
 /// purpose: the schema describes what an LLM emits, and a star rating from the
 /// model would be meaningless.
-typedef RecipeRating = ({int stars, String note});
+///
+/// [stars] is 0 for a note-only entry. [servings] is null only on an entry
+/// migrated from the single rating a version used to have, which never
+/// recorded it.
+typedef CookEntry = ({
+  String id,
+  DateTime date,
+  int? servings,
+  int stars,
+  String note,
+});
+
+/// The stars a version shows: its newest cook that was rated, so a fix shows
+/// up the next time it's made and a note-only entry doesn't reset the verdict.
+/// [entries] newest first, as [RecipeStore.entries] returns them.
+int headlineStars(List<CookEntry> entries) =>
+    entries.map((e) => e.stars).firstWhere((s) => s > 0, orElse: () => 0);
 
 /// Recipes as one JSON file each, in the app documents directory.
 class RecipeStore {
@@ -118,36 +134,93 @@ class RecipeStore {
     return chain;
   }
 
-  /// Ratings live in one sidecar map rather than in the recipe files. The
-  /// `.meta` extension keeps [loadAll] from trying to read it as a recipe.
-  File get _ratingsFile => File('${dir.path}/ratings.meta');
+  /// The cook log lives in one sidecar map, `{versionId: [entry, ...]}`,
+  /// rather than in the recipe files. The `.meta` extension keeps [loadAll]
+  /// from trying to read it as a recipe. Named for what it held before a
+  /// version could be cooked more than once.
+  File get _logFile => File('${dir.path}/ratings.meta');
 
-  Future<Map<String, dynamic>> _ratings() async {
-    final file = _ratingsFile;
+  Future<Map<String, List<CookEntry>>> _log() async {
+    final file = _logFile;
     if (!file.existsSync()) return {};
     try {
-      return jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      final raw = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      return {
+        for (final MapEntry(key: id, value: value) in raw.entries)
+          id: switch (value) {
+            List() => [for (final e in value) _decodeEntry(e as Map)],
+            // A version's single rating from before the log. Dated from the
+            // version itself — its id starts with its createdAt — since when
+            // it was cooked was never recorded.
+            Map() => [
+              (
+                id: 'legacy',
+                date: DateTime.fromMillisecondsSinceEpoch(
+                  int.tryParse(id.split('-').first) ?? 0,
+                ),
+                servings: null,
+                stars: value['stars'] as int,
+                note: value['note'] as String,
+              ),
+            ],
+            _ => throw FormatException('Bad cook log for $id'),
+          },
+      };
     } catch (e) {
-      debugPrint('Skipping unreadable ratings ${file.path}: $e');
+      // Losing the log costs notes, not recipes.
+      debugPrint('Skipping unreadable cook log ${file.path}: $e');
       return {};
     }
   }
 
-  Future<RecipeRating?> rating(String id) async {
-    final entry = (await _ratings())[id];
-    if (entry is! Map) return null;
-    return (stars: entry['stars'] as int, note: entry['note'] as String);
+  Future<void> _writeLog(Map<String, List<CookEntry>> log) =>
+      _logFile.writeAsString(
+        jsonEncode({
+          for (final MapEntry(key: id, value: entries) in log.entries)
+            id: [
+              for (final e in entries)
+                {
+                  'id': e.id,
+                  // UTC on disk, so a cook keeps its moment when the phone
+                  // changes timezone — or, once logs sync, changes phone.
+                  'date': e.date.toUtc().toIso8601String(),
+                  'servings': e.servings,
+                  'stars': e.stars,
+                  'note': e.note,
+                },
+            ],
+        }),
+      );
+
+  /// Every time version [id] was cooked, newest first.
+  Future<List<CookEntry>> entries(String id) async =>
+      [...?(await _log())[id]]..sort((a, b) => b.date.compareTo(a.date));
+
+  /// Adds [entry] to version [id]'s log, or replaces the one with its id.
+  Future<void> saveEntry(String id, CookEntry entry) async {
+    final log = await _log();
+    log[id] = [
+      for (final e in log[id] ?? const <CookEntry>[])
+        if (e.id != entry.id) e,
+      entry,
+    ];
+    await _writeLog(log);
   }
 
-  /// An empty rating removes the entry rather than storing a blank one.
-  Future<void> setRating(String id, RecipeRating rating) async {
-    final ratings = await _ratings();
-    if (rating.stars == 0 && rating.note.isEmpty) {
-      ratings.remove(id);
+  /// Removes one entry. A version whose last entry goes loses its key rather
+  /// than keeping an empty list.
+  Future<void> deleteEntry(String id, String entryId) async {
+    final log = await _log();
+    final remaining = [
+      for (final e in log[id] ?? const <CookEntry>[])
+        if (e.id != entryId) e,
+    ];
+    if (remaining.isEmpty) {
+      log.remove(id);
     } else {
-      ratings[id] = {'stars': rating.stars, 'note': rating.note};
+      log[id] = remaining;
     }
-    await _ratingsFile.writeAsString(jsonEncode(ratings));
+    await _writeLog(log);
   }
 
   /// Copies a picked photo in beside the recipes, returning the url to store
@@ -240,6 +313,14 @@ class RecipeStore {
     return saved;
   }
 }
+
+CookEntry _decodeEntry(Map e) => (
+  id: e['id'] as String,
+  date: DateTime.parse(e['date'] as String).toLocal(),
+  servings: e['servings'] as int?,
+  stars: e['stars'] as int,
+  note: e['note'] as String,
+);
 
 /// Re-importing the same recipe overwrites it instead of duplicating.
 String _idFor(Recipe recipe) {

@@ -4,7 +4,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     # On Cloud Run this comes from Secret Manager; locally from server/.env.
-    PEXELS_KEY: SecretStr
+    # Empty is allowed: Pexels may not be issuing keys, and photo search is the
+    # one feature that can be missing without the app noticing (/photos is a
+    # 503, which it reads as "no photos").
+    PEXELS_KEY: SecretStr = SecretStr("")
+    # The project, for its public keys (JWKS) and its admin API.
+    SUPABASE_URL: str
+    # Deletes users. Server-only: it bypasses every RLS policy.
+    SUPABASE_SECRET_KEY: SecretStr
 
     model_config = SettingsConfigDict(env_file=".env")
 

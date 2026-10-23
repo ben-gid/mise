@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import httpx
+from pydantic import SecretStr
 import pytest
 from fastapi.testclient import TestClient
 
@@ -81,3 +82,11 @@ def test_a_forged_forwarded_for_does_not_buy_a_fresh_limit(upstream, monkeypatch
 
     assert ask("ramen", "1.1.1.1") == 200
     assert ask("pho", "2.2.2.2") == 429
+
+
+def test_no_pexels_key_is_a_503_without_calling_upstream(upstream, monkeypatch):
+    # Pexels isn't issuing keys: the server still deploys and serves accounts,
+    # and the app reads the 503 as "no photos" and falls through to Wikipedia.
+    monkeypatch.setattr(main.settings, "PEXELS_KEY", SecretStr(""))
+    assert client.get("/photos", params={"query": "ramen"}).status_code == 503
+    assert upstream.requests == []

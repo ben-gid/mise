@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import 'recipe/recipe_account.dart';
 import 'recipe/recipe_parser.dart';
 import 'recipe/recipe_store.dart';
 import 'recipe/recipe_units.dart';
@@ -30,6 +33,9 @@ Future<void> main() async {
     (by) => units.length > 2 && by.name == units[2],
     orElse: () => MeasureBy.asWritten,
   );
+  // Not awaited: the account is for sync and server routes, never for opening
+  // the app, and offline it can take a while to settle.
+  unawaited(startAccount());
   runApp(RecipeApp(store: store, parser: parser));
 }
 

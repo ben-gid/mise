@@ -12,14 +12,27 @@ flutter analyze                           # must stay clean
 dart run build_runner build               # after ANY change to recipe_models.dart
 flutter run                               # a phone/tablet device or emulator — the real target
 flutter run -d linux                      # desktop, only to eyeball a change quickly
-flutter run --dart-define-from-file=env.json   # with stock photos; see env.example.json
+flutter run --dart-define-from-file=env.json   # with photos and accounts; see env.example.json
 
-# server/ — the photo search proxy (FastAPI, uv, Cloud Run)
+# server/ — photo search proxy + account routes (FastAPI, uv, Cloud Run)
 cd server && uv run pytest
-cd server && uv run uvicorn app.main:app --reload   # needs PEXELS_KEY in server/.env
-gcloud run deploy mise-photos --source server --region us-central1 \
-  --allow-unauthenticated --max-instances 2 --set-secrets PEXELS_KEY=pexels-key:latest
+cd server && uv run uvicorn app.main:app --reload   # needs server/.env (SUPABASE_*; PEXELS_KEY optional)
+
+# Ship: all tests, then Supabase migrations, then Cloud Run → api.mise.bengid.dev
+scripts/deploy.sh            # asks once before changing anything; --yes skips the prompt
 ```
+
+`scripts/deploy.sh` is the only way the server and database should change. It runs
+`flutter analyze`, `flutter test` and `pytest` first and stops on any failure; shows the
+migrations `supabase db push` would apply; then migrates *before* deploying, because new
+server code may need the new schema — so a migration must stay additive. GCP project
+`mise-bengid`, service `mise-api`, region `us-central1` (domain mappings aren't offered
+everywhere). Secrets live in Secret Manager and are created from `server/.env` only when
+missing; rotating one is `gcloud secrets versions add`, never a side effect of a deploy.
+Supabase project ref `mpaulmfgrdnerbepehnt`; migration filenames carry the version the
+project recorded, so a migration applied any other way (the dashboard, the MCP) has to be
+renamed to match or `db push` will try it again. The Supabase CLI is pinned in
+`mise.toml`.
 
 `--delete-conflicting-outputs` was removed in this build_runner version and is ignored — drop it.
 
@@ -138,7 +151,7 @@ Per-ingredient flips are deliberately **not** persisted — a `Set<String>` in t
 screen's state, gone when you leave. `measureBy` is the persisted half, appended as a third
 value to the `units.meta` line. If per-recipe persistence is ever added it needs carrying
 forward in `saveVersion`: a recipe's id derives from `createdAt`, which every edit
-restamps, which is why ratings silently reset on edit today.
+restamps — the same reason a new version starts with an empty cook log.
 
 **Weight reads in decimals, volume in fractions.** Not an inconsistency to tidy up: weight is
 measured on a scale, which shows `1 lb 9.1 oz` and has no decimal-pound mode at all, so
@@ -178,7 +191,9 @@ an APK, and one key's 200/hour is shared by every install. [server/](server/) is
 one-route FastAPI proxy on Cloud Run: `GET /photos?query=` answers a JSON list of urls,
 best first, with the key from Secret Manager. It caches each query for a day across every
 phone, and an upstream failure is a 502 that is never cached, so a 429 does not stick as
-"no photos". It departs from the usual FastAPI layout on purpose — no `api/routes/`, no
+"no photos". The key is optional: with none (Pexels stopped issuing them), `/photos` is a
+503 before any cache or upstream work, the app reads that as "no photos" and falls
+through to Wikipedia, and `scripts/deploy.sh` deploys without the secret. It departs from the usual FastAPI layout on purpose — no `api/routes/`, no
 `crud.py`, no generated client, no database — because it is one route and one caller,
 and the Dart side parses a list of strings by hand. The url is public, so the key is
 safe but the quota is not: each caller IP gets 50 Pexels searches an hour (cache hits
@@ -198,8 +213,8 @@ always-visible "Choose photo" action opens a bottom sheet (the app's only one �
 photos on a phone, where a dialog is a letterbox) with the results plus "Use my own
 photo". Both a kept result and a pick save through `RecipeStore.save`, **not**
 `saveVersion` and **not** `_adopt`: the id is `<createdAtMillis>-<title-slug>` and
-neither half moves, so the same file is rewritten, the rating stays attached and history
-gets no entry. `_adopt` clears the stars, correctly, because every other caller minted a
+neither half moves, so the same file is rewritten, the cook log stays attached and history
+gets no entry. `_adopt` clears the log, correctly, because every other caller minted a
 new id. "Use my own photo" still goes through the editor's picker and `saveVersion` —
 an asymmetry that is cheaper than a second `ImagePicker` path.
 
@@ -233,9 +248,43 @@ the recipe and would otherwise find the picture gone.
 describes what an LLM emits, not how we file it), so `RecipeStore.loadAll` returns
 `(id, recipe)` records. A file that won't decode is skipped and logged, never deleted.
 `RecipeStore` takes a `Directory` so tests can point it at a temp dir. Everything that isn't
-a recipe — version history, ratings, the theme, the unit systems — lives beside them in
+a recipe — version history, cook logs, the theme, the unit systems — lives beside them in
 plain-text `.meta` sidecars, and the extension is what keeps `loadAll` from trying to parse
 them as recipes. A settings file written as `.json` would show up as a corrupt recipe.
+
+**A version is cooked many times, so it carries a log, not a rating.** `ratings.meta` maps
+each *version* id to a list of `CookEntry` — date, servings, stars, note — and the
+history screen is where "v2 was the good one" shows: the diff says what you did, the log
+says whether it worked. Per version on purpose, so an edit starts an empty log. The
+headline stars are the newest entry *with* stars (`headlineStars`, used by both screens),
+so a fix shows up the next time it is made and a note-only entry doesn't reset the
+verdict. Entries are only ever added or replaced by their own id, which is what lets
+sync merge two devices' logs without a conflict rule. The file is still called
+`ratings.meta` because a version used to hold one `{stars, note}`; `_log` reads that old
+shape as a single entry, dated from the version id's `createdAtMillis` prefix since when
+it was cooked was never recorded. Entries open in an `AlertDialog`, not a sheet — the
+photo picker stays the only one.
+
+**Every install has an account; nobody is asked to make one.** `startAccount` in
+[lib/recipe/recipe_account.dart](lib/recipe/recipe_account.dart) restores the saved
+Supabase session or signs in anonymously, and `main()` never awaits it — the app opens
+the same offline, and an anonymous sign-in that failed retries on resume. The anonymous
+user is a real user with a real id and a `profiles` row (made by trigger, readable only
+by its owner, written only by the server), which is what free tries and sync hang off.
+"Continue with Google/Apple" *links* that provider to the same id, so nothing migrates.
+`linkOrSwitch` is the one subtle part: on a second phone the provider already belongs
+to another user, linking fails with `identity_already_exists`, and signing in with the
+same token moves this phone onto that user instead. Sign out and Delete account both
+leave the recipe files alone and start a fresh anonymous user. An empty `SUPABASE_URL`
+means accounts are off — no initialise, no Settings panel — which is how `flutter test`
+and the desktop harness run, the same rule an empty `PHOTO_PROXY` follows.
+
+The server never trusts a user id it is told: `current_user` in
+[server/app/auth.py](server/app/auth.py) verifies the access token against the
+project's public JWKS (ES256), audience `authenticated`, issuer
+`<SUPABASE_URL>/auth/v1`. The secret key is only for the admin API (`DELETE /me`), goes
+in `apikey` and never in `Authorization`, and bypasses every RLS policy — it stays in
+Secret Manager. Schema changes go in `supabase/migrations/` *and* to the project.
 
 **No state management package and none wanted** — three screens over one store, plain
 `StatefulWidget` + `setState`, `Navigator.push` between them. The store and parser are
@@ -274,6 +323,10 @@ constructed once in `main()` and passed down by constructor.
 - `image_picker` has no Linux implementation, so "Choose photo" throws
   `MissingPluginException` on the desktop harness and answers with a SnackBar.
   Expect that, the same way the share button degrades to `mailto:` there.
+- Sign in with Apple is written but has **never run** — it needs Xcode's "Sign in
+  with Apple" capability and a Mac. Android shows Google only, on purpose. Google
+  sign-in on Android needs the signing key's SHA-1 on the Android OAuth client; the
+  debug keystore here lives at `~/.config/.android/debug.keystore`, not `~/.android`.
 - A `Future` made in the fake-async zone never delivers inside `tester.runAsync`.
   `seedPexels` stores one, so call it *inside* `runAsync`; seeded above it, the chain
   waits on the seed until the test times out, with no error. `pumpPhotos` in

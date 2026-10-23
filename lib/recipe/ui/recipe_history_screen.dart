@@ -2,13 +2,14 @@ import 'package:flutter/material.dart';
 
 import '../recipe_diff.dart';
 import '../recipe_store.dart';
+import 'cook_log.dart';
 import 'glass.dart';
 
 /// Every version of one recipe, newest first: what changed at each edit, and
-/// how that version was rated once it had been cooked.
+/// every time that version was cooked.
 ///
-/// Ratings are per-version on purpose, so this is where "v2 was the good one"
-/// becomes visible — the diff says what you did, the stars say whether it
+/// Cook logs are per-version on purpose, so this is where "v2 was the good
+/// one" becomes visible — the diff says what you did, the stars say whether it
 /// worked.
 ///
 /// Pops with the restored [SavedRecipe] if the user restores one.
@@ -22,10 +23,10 @@ class RecipeHistoryScreen extends StatefulWidget {
   State<RecipeHistoryScreen> createState() => _RecipeHistoryScreenState();
 }
 
-/// One version, its rating, and what it changed from the version before it.
+/// One version, its cook log, and what it changed from the version before it.
 typedef _Version = ({
   SavedRecipe saved,
-  RecipeRating? rating,
+  List<CookEntry> entries,
   List<RecipeChange> changes,
 });
 
@@ -36,14 +37,14 @@ class _RecipeHistoryScreenState extends State<RecipeHistoryScreen> {
     final chain = await widget.store.history(widget.id);
     // ponytail: re-reads ratings.meta once per version; batch if chains
     // ever get long.
-    final ratings = await Future.wait(
-      chain.map((saved) => widget.store.rating(saved.$1)),
+    final logs = await Future.wait(
+      chain.map((saved) => widget.store.entries(saved.$1)),
     );
     return [
       for (final (index, saved) in chain.indexed)
         (
           saved: saved,
-          rating: ratings[index],
+          entries: logs[index],
           // The chain runs newest first, so a version's parent is the next
           // entry along. The oldest has none — it is the original.
           changes: index + 1 < chain.length
@@ -113,7 +114,7 @@ class _VersionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final accent = tagAccent(context, version.saved.$2.tags);
-    final rating = version.rating;
+    final entries = version.entries;
 
     return GlassPanel(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
@@ -143,23 +144,14 @@ class _VersionCard extends StatelessWidget {
               _formatDate(version.saved.$2.createdAt),
               style: theme.textTheme.bodySmall,
             ),
-            if (rating != null) ...[
+            if (entries.isNotEmpty) ...[
               const SizedBox(height: 8),
-              Row(
-                children: [
-                  for (var star = 1; star <= 5; star++)
-                    Icon(
-                      star <= rating.stars ? Icons.star : Icons.star_border,
-                      size: 18,
-                      color: star <= rating.stars ? accent : null,
-                    ),
-                ],
-              ),
-              if (rating.note.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(rating.note, style: theme.textTheme.bodyMedium),
-                ),
+              if (headlineStars(entries) case final stars when stars > 0)
+                StarsRow(stars: stars, accent: accent, size: 18),
+              // The whole log, not the detail screen's latest two: this is
+              // where versions get compared.
+              for (final entry in entries)
+                CookEntryLine(entry: entry, accent: accent),
             ],
             const SizedBox(height: 12),
             if (isOriginal)
@@ -411,22 +403,7 @@ class _BandedLine extends StatelessWidget {
 
 /// "17 Aug 2026, 14:32" — local time, since it is the user's own edit.
 String _formatDate(DateTime date) {
-  const months = [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
-  ];
   final local = date.toLocal();
   final minute = local.minute.toString().padLeft(2, '0');
-  return '${local.day} ${months[local.month - 1]} ${local.year}, '
-      '${local.hour}:$minute';
+  return '${formatDay(local)}, ${local.hour}:$minute';
 }

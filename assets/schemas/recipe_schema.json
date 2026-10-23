@@ -33,7 +33,7 @@
     "image_query": {
       "type": ["string", "null"],
       "maxLength": 60,
-      "description": "Two to four words for what the finished dish LOOKS like, written the way you would type it into a stock photo search box \u2014 the food, its form, and at most one visible quality: \"rustic focaccia bread\", \"creamy mushroom pasta\", \"chocolate layer cake slice\". Not the recipe's title, not a cuisine, not a person's or brand's name, nothing about taste, difficulty or occasion, nothing a camera cannot see. The app searches a photo library with this string, so words a photographer would use beat words a cook would."
+      "description": "Two to four words for what the finished dish LOOKS like, written the way you would type it into a stock photo search box \u2014 the food, its form, and at most one visible quality: \"rustic focaccia bread\", \"creamy mushroom pasta\", \"chocolate layer cake slice\". Not the recipe's title, not a cuisine, not a person's or brand's name, nothing about taste, difficulty or occasion, nothing a camera cannot see. A dish's common name is fine where a photographer would tag the photo with it: \"victoria sponge cake\", \"pad thai\". The app searches a photo library with this string, so words a photographer would use beat words a cook would."
     },
     "image_urls": {
       "type": "array",
@@ -106,7 +106,7 @@
         "timer_seconds": {
           "type": ["integer", "null"],
           "minimum": 1,
-          "description": "Set whenever the step involves waiting: proofing, baking, resting, chilling, simmering"
+          "description": "Set whenever the step involves waiting: proofing, baking, resting, chilling, simmering \u2014 and for timed cooking on the stove, like browning or reducing. Not for hands-on work like whisking, creaming or kneading."
         }
       }
     }

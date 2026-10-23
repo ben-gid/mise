@@ -141,7 +141,13 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
   Future<void> _pickImage() async {
     String message;
     try {
-      final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
+      // Shrunk on the way in: a phone photo is 3–12 MB, and this one is shown
+      // at most screen-wide — and will be uploaded once recipes sync.
+      final picked = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1600,
+        imageQuality: 85,
+      );
       if (picked == null || !mounted) return;
       final url = await widget.store.addImage(picked.path);
       if (!mounted) return;

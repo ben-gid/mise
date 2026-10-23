@@ -20,7 +20,7 @@ import 'recipe_store.dart';
 /// an absolute path. See [RecipeStore.addImage] for why it can't be absolute.
 const _localScheme = 'mise://';
 
-/// The photo search proxy in `server/`, e.g. `https://mise-photos-….run.app`.
+/// The photo search proxy in `server/`, e.g. `https://api.mise.bengid.dev`.
 /// Read at compile time: `flutter run --dart-define-from-file=env.json`.
 ///
 /// A proxy rather than the Pexels key itself: anything compiled into the app

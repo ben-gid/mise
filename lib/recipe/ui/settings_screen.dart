@@ -1,11 +1,16 @@
-import 'package:flutter/material.dart';
+import 'dart:io';
 
+import 'package:flutter/material.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:sign_in_with_apple/sign_in_with_apple.dart';
+
+import '../recipe_account.dart';
 import '../recipe_store.dart';
 import '../recipe_units.dart';
 import 'glass.dart';
 
-/// Settings. Theme, then the display units — another one goes in as another
-/// panel under these.
+/// Settings. Theme, then the display units, then the account when this build
+/// has one — another one goes in as another panel under these.
 class SettingsScreen extends StatefulWidget {
   final RecipeStore store;
 
@@ -102,9 +107,113 @@ class _SettingsScreenState extends State<SettingsScreen> {
               'that one.',
             ),
           ),
+          // Last, not first: the app works the same signed in or not, and a
+          // sign-in panel at the top of Settings reads as a gate.
+          if (accountsOn) ...[
+            _heading('Account'),
+            ValueListenableBuilder(
+              valueListenable: account,
+              builder: (context, current, _) => _account(current),
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  Widget _account(Account? current) {
+    final email = current?.email;
+    if (email == null) {
+      return _panel([
+        const ListTile(
+          title: Text('Not signed in'),
+          subtitle: Text(
+            'Sign in to keep your recipes when you change phones. '
+            'Everything works without it.',
+          ),
+        ),
+        ListTile(
+          leading: const Icon(Icons.login),
+          title: const Text('Continue with Google'),
+          onTap: () => _run(signInWithGoogle),
+        ),
+        // Apple's own rule: offering Google on iOS means offering Apple too.
+        if (Platform.isIOS)
+          ListTile(
+            leading: const Icon(Icons.apple),
+            title: const Text('Continue with Apple'),
+            onTap: () => _run(signInWithApple),
+          ),
+      ]);
+    }
+    final danger = Theme.of(context).colorScheme.error;
+    return _panel([
+      ListTile(
+        leading: const Icon(Icons.account_circle_outlined),
+        title: Text(email),
+        subtitle: const Text('Signed in'),
+      ),
+      ListTile(
+        leading: const Icon(Icons.logout),
+        title: const Text('Sign out'),
+        subtitle: const Text('Your recipes stay on this phone'),
+        onTap: () => _run(signOut),
+      ),
+      ListTile(
+        leading: Icon(Icons.delete_outline, color: danger),
+        title: Text('Delete account', style: TextStyle(color: danger)),
+        onTap: _confirmDelete,
+      ),
+    ]);
+  }
+
+  Future<void> _confirmDelete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete your account?'),
+        content: const Text(
+          'Your recipes stay on this phone. The account, and anything kept '
+          'with it, is deleted for good.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Keep it'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) await _run(deleteAccount);
+  }
+
+  /// Runs an account action, answering any failure with a SnackBar — the same
+  /// way the photo picker degrades where its plugin is missing. Backing out of
+  /// the Google or Apple sheet is not a failure and says nothing.
+  Future<void> _run(Future<void> Function() action) async {
+    try {
+      await action();
+    } catch (e) {
+      // Logged before the cancel check, not after: Credential Manager reports a
+      // misconfigured OAuth client ("[16] Account reauth failed") as a cancel,
+      // and a silent misconfiguration is the worst kind.
+      debugPrint('Account action failed: $e');
+      final cancelled =
+          (e is GoogleSignInException &&
+              e.code == GoogleSignInExceptionCode.canceled) ||
+          (e is SignInWithAppleAuthorizationException &&
+              e.code == AuthorizationErrorCode.canceled);
+      if (cancelled || !mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Couldn't reach your account. Try again in a moment."),
+        ),
+      );
+    }
   }
 
   /// The units the system reads in go in the subtitle rather than the title —
