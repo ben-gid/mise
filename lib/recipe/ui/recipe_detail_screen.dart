@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,6 +11,7 @@ import '../recipe_parser.dart';
 import '../recipe_scaling.dart';
 import '../recipe_store.dart';
 import '../recipe_sync.dart';
+import '../recipe_timers.dart';
 import 'cook_log.dart';
 import 'glass.dart';
 import 'recipe_edit_screen.dart';
@@ -492,6 +495,8 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
                     _StepRow(
                       number: index + 1,
                       step: step,
+                      timer: timerKey(_id, step.id),
+                      recipeTitle: recipe.title,
                       last: index == recipe.steps.length - 1,
                       text: renderContent(
                         step,
@@ -1129,11 +1134,17 @@ class _StepRow extends StatelessWidget {
   /// The step's words with every `{0001}` already scaled and spelled out.
   final String text;
 
+  /// Its [timerKey], and the recipe's name for the notification.
+  final String timer;
+  final String recipeTitle;
+
   const _StepRow({
     required this.number,
     required this.step,
     required this.last,
     required this.text,
+    required this.timer,
+    required this.recipeTitle,
   });
 
   @override
@@ -1167,33 +1178,11 @@ class _StepRow extends StatelessWidget {
                 Text(text, style: theme.textTheme.bodyLarge),
                 if (step.timerSeconds case final seconds?) ...[
                   const SizedBox(height: 10),
-                  DecoratedBox(
-                    decoration: ShapeDecoration(
-                      shape: StadiumBorder(
-                        side: BorderSide(color: scheme.primary),
-                      ),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(10, 7, 14, 7),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.timer_outlined,
-                            size: 16,
-                            color: scheme.primary,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            formatDuration(seconds),
-                            style: weighted(
-                              theme.textTheme.bodyMedium,
-                              FontWeight.w600,
-                            )?.copyWith(color: scheme.primary),
-                          ),
-                        ],
-                      ),
-                    ),
+                  _StepTimer(
+                    timer: timer,
+                    length: Duration(seconds: seconds),
+                    stepTitle: step.title,
+                    recipeTitle: recipeTitle,
                   ),
                 ],
               ],
@@ -1201,6 +1190,122 @@ class _StepRow extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// A step's timer: a Start button, then the time left counting down, then
+/// Done. The countdown is read off [timers]' end time each second, so it is
+/// right after the phone has been locked and the app suspended.
+class _StepTimer extends StatefulWidget {
+  final String timer;
+  final Duration length;
+  final String stepTitle;
+  final String recipeTitle;
+
+  const _StepTimer({
+    required this.timer,
+    required this.length,
+    required this.stepTitle,
+    required this.recipeTitle,
+  });
+
+  @override
+  State<_StepTimer> createState() => _StepTimerState();
+}
+
+class _StepTimerState extends State<_StepTimer> {
+  /// Ticks only while this step's timer runs. An indefinite animation would
+  /// hang `pumpAndSettle` (CLAUDE.md), so idle and finished timers never tick.
+  Timer? _tick;
+
+  @override
+  void initState() {
+    super.initState();
+    timers.addListener(_sync);
+    _sync();
+  }
+
+  @override
+  void dispose() {
+    timers.removeListener(_sync);
+    _tick?.cancel();
+    super.dispose();
+  }
+
+  DateTime? get _end => timers.value[widget.timer];
+
+  /// Starts or stops ticking to match [timers], and repaints.
+  void _sync() {
+    final end = _end;
+    final running = end != null && end.isAfter(DateTime.now());
+    if (running && _tick == null) {
+      _tick = Timer.periodic(const Duration(seconds: 1), (_) => _sync());
+    } else if (!running) {
+      _tick?.cancel();
+      _tick = null;
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _start() => startTimer(
+    widget.timer,
+    length: widget.length,
+    title: '${widget.stepTitle} — done',
+    body: widget.recipeTitle,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final label = weighted(theme.textTheme.bodyMedium, FontWeight.w600);
+    final end = _end;
+    if (end == null) {
+      return OutlinedButton.icon(
+        onPressed: _start,
+        icon: const Icon(Icons.timer_outlined, size: 18),
+        label: Text('Start ${formatDuration(widget.length.inSeconds)} timer'),
+      );
+    }
+    final left = end.difference(DateTime.now());
+    final done = left <= Duration.zero;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        DecoratedBox(
+          decoration: ShapeDecoration(
+            shape: const StadiumBorder(),
+            color: done ? scheme.primaryContainer : scheme.primary,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 16, 10),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  done ? Icons.check : Icons.timer_outlined,
+                  size: 18,
+                  color: done ? scheme.onPrimaryContainer : scheme.onPrimary,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  done ? 'Done' : formatCountdown(left),
+                  style: label?.copyWith(
+                    color: done ? scheme.onPrimaryContainer : scheme.onPrimary,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        IconButton(
+          onPressed: () => clearTimer(widget.timer),
+          tooltip: done ? 'Clear timer' : 'Cancel timer',
+          icon: const Icon(Icons.close),
+        ),
+      ],
     );
   }
 }

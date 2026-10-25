@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 /// "Spread" — the app's visual identity.
 ///
@@ -194,9 +195,7 @@ Widget barPane(BuildContext context, {double opacity = 1}) {
     decoration: BoxDecoration(
       color: scheme.surface.withValues(alpha: opacity),
       border: Border(
-        bottom: BorderSide(
-          color: glassRim(context).withValues(alpha: opacity),
-        ),
+        bottom: BorderSide(color: glassRim(context).withValues(alpha: opacity)),
       ),
     ),
     child: const SizedBox.expand(),
@@ -272,6 +271,198 @@ class GlassPanel extends StatelessWidget {
       ),
     );
   }
+}
+
+/// A page with no app bar: a round back button, the page's name set large in
+/// the serif, and [children] under it in one scrolling column. Every screen
+/// but the recipe view and the editor is one of these.
+class SpreadPage extends StatelessWidget {
+  final String title;
+
+  /// A line under the title saying what the page is about.
+  final String? subtitle;
+  final List<Widget> children;
+
+  /// Pinned under the scrolling column, above the keyboard — for the one
+  /// action a page exists to take.
+  final Widget? bottom;
+
+  const SpreadPage({
+    super.key,
+    required this.title,
+    this.subtitle,
+    required this.children,
+    this.bottom,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      // No app bar to set the status bar's icons, so say it here.
+      value: theme.brightness == Brightness.dark
+          ? SystemUiOverlayStyle.light
+          : SystemUiOverlayStyle.dark,
+      child: Scaffold(
+        bottomNavigationBar: bottom == null
+            ? null
+            : SafeArea(
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    16,
+                    8,
+                    16,
+                    8 + MediaQuery.viewInsetsOf(context).bottom,
+                  ),
+                  child: bottom,
+                ),
+              ),
+        body: SafeArea(
+          bottom: false,
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
+            children: [
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: RoundBackButton(),
+              ),
+              const SizedBox(height: 14),
+              Text(title, style: theme.textTheme.headlineLarge),
+              if (subtitle case final subtitle?) ...[
+                const SizedBox(height: 8),
+                Text(
+                  subtitle,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 24),
+              ...children,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Back, as a round button on the wash rather than a bare arrow, so it reads
+/// as a control on a page that has no bar around it.
+class RoundBackButton extends StatelessWidget {
+  const RoundBackButton({super.key});
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+    onPressed: () => Navigator.maybePop(context),
+    tooltip: MaterialLocalizations.of(context).backButtonTooltip,
+    style: IconButton.styleFrom(
+      backgroundColor: glassFill(context),
+      fixedSize: const Size(48, 48),
+    ),
+    icon: const BackButtonIcon(),
+  );
+}
+
+/// "APPEARANCE", "LAST MADE": a small herb label over a group.
+class SectionLabel extends StatelessWidget {
+  final String text;
+
+  const SectionLabel(this.text, {super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Text(
+      text.toUpperCase(),
+      style: weighted(
+        theme.textTheme.labelMedium,
+        FontWeight.w600,
+      )?.copyWith(color: theme.colorScheme.primary, letterSpacing: 1.2),
+    );
+  }
+}
+
+/// A row of mutually exclusive choices on one pill: the chosen one sits on a
+/// white chip. Lighter than [SegmentedButton], whose outlined segments and
+/// check marks are a different visual language from the rest of the page.
+class Segmented<T> extends StatelessWidget {
+  final List<(T, String)> options;
+  final T selected;
+  final ValueChanged<T> onChanged;
+
+  /// Share the full width equally rather than hugging the labels.
+  final bool expand;
+
+  const Segmented({
+    super.key,
+    required this.options,
+    required this.selected,
+    required this.onChanged,
+    this.expand = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final label = weighted(theme.textTheme.bodyMedium, FontWeight.w600);
+    return DecoratedBox(
+      decoration: ShapeDecoration(
+        shape: const StadiumBorder(),
+        color: glassFill(context),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(4),
+        child: Row(
+          mainAxisSize: expand ? MainAxisSize.max : MainAxisSize.min,
+          children: [
+            for (final (value, text) in options)
+              _segment(
+                expand: expand,
+                child: Semantics(
+                  selected: value == selected,
+                  inMutuallyExclusiveGroup: true,
+                  button: true,
+                  child: Material(
+                    shape: const StadiumBorder(),
+                    color: value == selected
+                        ? scheme.surface
+                        : Colors.transparent,
+                    elevation: value == selected ? 1 : 0,
+                    shadowColor: Colors.black26,
+                    child: InkWell(
+                      customBorder: const StadiumBorder(),
+                      onTap: () => onChanged(value),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(minHeight: 40),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          child: Center(
+                            widthFactor: 1,
+                            child: Text(
+                              text,
+                              style: label?.copyWith(
+                                color: value == selected
+                                    ? scheme.onSurface
+                                    : scheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static Widget _segment({required bool expand, required Widget child}) =>
+      expand ? Expanded(child: child) : child;
 }
 
 // ---------------------------------------------------------------------------

@@ -7,6 +7,7 @@ import 'package:mise/recipe/recipe_models.dart';
 import 'package:mise/recipe/recipe_image.dart';
 import 'package:mise/recipe/recipe_parser.dart';
 import 'package:mise/recipe/recipe_store.dart';
+import 'package:mise/recipe/recipe_timers.dart';
 import 'package:mise/recipe/recipe_units.dart';
 import 'package:mise/recipe/ui/cook_log.dart';
 import 'package:mise/recipe/ui/recipe_detail_screen.dart';
@@ -34,6 +35,7 @@ void main() {
     // A photo search seeded by one test would otherwise surface in every
     // recipe the tests after it open.
     forgetPexels();
+    timers.value = const {};
   });
 
   /// Pumps inside [tester.runAsync] until [ready], which must describe what the
@@ -687,6 +689,23 @@ void main() {
     expect(find.textContaining('No fixed size for flaky salt'), findsOneWidget);
   });
 
+  testWidgets('a step timer counts down and can be cancelled', (tester) async {
+    tallSurface(tester);
+    await pumpDetail(tester);
+    await scrollTo(tester, find.text('Start 5 min timer'));
+
+    await tester.tap(find.text('Start 5 min timer'));
+    // pump, not pumpAndSettle: a running timer repaints every second.
+    await tester.pump();
+    // Read off the wall clock, so the whole five minutes or a second under.
+    expect(find.textContaining(RegExp(r'^(5:00|4:59)$')), findsOneWidget);
+    expect(find.text('Start 5 min timer'), findsNothing);
+
+    await tester.tap(find.byTooltip('Cancel timer'));
+    await tester.pump();
+    expect(find.text('Start 5 min timer'), findsOneWidget);
+  });
+
   /// Opens the editor from the detail screen and waits for its fields.
   ///
   /// On a tall surface, because the headnote field now leads the form and a
@@ -709,7 +728,7 @@ void main() {
   Future<void> saveVersion(WidgetTester tester, String expectTitle) async {
     await tester.runAsync(() async {
       await tester.tap(
-        find.widgetWithText(FloatingActionButton, 'Save version'),
+        find.widgetWithText(FilledButton, 'Save version'),
       );
       await pumpUntil(
         tester,
@@ -876,12 +895,12 @@ void main() {
 
     // The first close icon is the first ingredient's remove button — below the
     // fold in a test viewport, since the image field sits above the list.
-    await scrollTo(tester, find.byIcon(Icons.close).first);
+    await scrollTo(tester, find.byTooltip('Remove ingredient').first);
     // Same as the pinch row above: scrollUntilVisible stops as soon as it is on
     // screen, which is underneath the app bar the body scrolls behind.
     await tester.drag(find.byType(Scrollable).first, const Offset(0, 140));
     await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(Icons.close).first);
+    await tester.tap(find.byTooltip('Remove ingredient').first);
     await tester.pumpAndSettle();
     expect(find.textContaining('step 1'), findsOneWidget);
 
@@ -923,7 +942,7 @@ void main() {
     await openEditor(tester);
     await enterJson(tester, withUnusedIngredient());
 
-    await tester.tap(find.widgetWithText(FloatingActionButton, 'Save version'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Save version'));
     await tester.pumpAndSettle();
 
     expect(find.text('One ingredient is never used'), findsOneWidget);
@@ -943,7 +962,7 @@ void main() {
     await openEditor(tester);
     await enterJson(tester, withUnusedIngredient());
 
-    await tester.tap(find.widgetWithText(FloatingActionButton, 'Save version'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Save version'));
     await tester.pumpAndSettle();
     await tester.runAsync(() async {
       await tester.tap(find.text('Remove it'));
@@ -960,7 +979,7 @@ void main() {
     // ...and the other way: keep it despite the warning.
     await openEditor(tester);
     await enterJson(tester, withUnusedIngredient());
-    await tester.tap(find.widgetWithText(FloatingActionButton, 'Save version'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Save version'));
     await tester.pumpAndSettle();
     await tester.runAsync(() async {
       await tester.tap(find.text('Save anyway'));
@@ -984,7 +1003,7 @@ void main() {
       find.widgetWithText(TextField, 'Ingredient').first,
       '',
     );
-    await tester.tap(find.widgetWithText(FloatingActionButton, 'Save version'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Save version'));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('[bread flour]'), findsWidgets);

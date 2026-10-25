@@ -249,7 +249,7 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
                   ),
                   if (lastMade case final lastMade?) ...[
                     const SizedBox(height: 22),
-                    _SectionLabel('Last made'),
+                    SectionLabel('Last made'),
                     const SizedBox(height: 10),
                     _Featured(
                       saved: lastMade,
@@ -260,7 +260,7 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
                     ),
                   ],
                   const SizedBox(height: 24),
-                  _SectionLabel(heading),
+                  SectionLabel(heading),
                   const SizedBox(height: 10),
                   if (shown.isEmpty && searching)
                     Padding(
@@ -304,24 +304,6 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _SectionLabel extends StatelessWidget {
-  final String text;
-
-  const _SectionLabel(this.text);
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Text(
-      text.toUpperCase(),
-      style: weighted(
-        theme.textTheme.labelMedium,
-        FontWeight.w600,
-      )?.copyWith(color: theme.colorScheme.primary, letterSpacing: 1.2),
     );
   }
 }

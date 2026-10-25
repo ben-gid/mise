@@ -65,87 +65,144 @@ class _ImportRecipeScreenState extends State<ImportRecipeScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return GlassScaffold(
-      appBar: glassAppBar(
-        context,
-        title: const Text('Import recipe'),
-        actions: [
-          TextButton.icon(
-            onPressed: _copyPrompt,
-            icon: const Icon(Icons.content_copy, size: 18),
-            label: const Text('Copy prompt'),
-          ),
-        ],
+    final muted = theme.textTheme.bodyMedium?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    return SpreadPage(
+      title: 'Import a recipe',
+      subtitle: 'Ask any chat model for a recipe, then paste its answer here.',
+      bottom: FilledButton(
+        onPressed: _import,
+        style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(54)),
+        child: const Text('Import'),
       ),
-      body: Padding(
-        padding: EdgeInsets.fromLTRB(
-          16,
-          16 + glassAppBarInset(context),
-          16,
-          16,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _Step(
+          number: 1,
+          title: 'Copy the prompt',
           children: [
             Text(
-              'Paste the JSON an LLM gave you. It is validated against the '
-              'recipe schema before anything is saved.',
-              style: theme.textTheme.bodyMedium,
+              'It carries the schema, so the model writes a recipe mise can '
+              'read.',
+              style: muted,
             ),
-            const SizedBox(height: 12),
-            Expanded(
-              child: TextField(
-                controller: _controller,
-                maxLines: null,
-                expands: true,
-                textAlignVertical: TextAlignVertical.top,
-                // 'monospace' resolves only on some platforms, so name real
-                // families to fall back to rather than silently landing on the
-                // proportional default.
-                style: const TextStyle(
-                  fontFamily: 'monospace',
-                  fontFamilyFallback: [
-                    'Menlo',
-                    'Consolas',
-                    'DejaVu Sans Mono',
-                    'Courier New',
-                  ],
-                  fontSize: 13,
-                  height: 1.4,
-                ),
-                decoration: const InputDecoration(
-                  hintText: '{\n  "title": "…",\n  "base_servings": 4,\n  …\n}',
-                  alignLabelWithHint: true,
-                ),
-                onChanged: (_) {
-                  if (_errors.isNotEmpty) setState(() => _errors = const []);
-                },
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                onPressed: _copyPrompt,
+                icon: const Icon(Icons.content_copy, size: 18),
+                label: const Text('Copy prompt'),
               ),
-            ),
-            if (_errors.isNotEmpty) ErrorList(errors: _errors),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: _pasteFromClipboard,
-                    icon: const Icon(Icons.paste),
-                    label: const Text('Paste'),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: _import,
-                    icon: const Icon(Icons.check),
-                    label: const Text('Import'),
-                  ),
-                ),
-              ],
             ),
           ],
         ),
-      ),
+        const SizedBox(height: 24),
+        _Step(
+          number: 2,
+          title: 'Paste what it gave you',
+          action: TextButton.icon(
+            onPressed: _pasteFromClipboard,
+            style: TextButton.styleFrom(backgroundColor: glassFill(context)),
+            icon: const Icon(Icons.content_paste, size: 18),
+            label: const Text('Paste'),
+          ),
+          children: [
+            Text(
+              'It is checked against the recipe schema before anything is '
+              'saved.',
+              style: muted,
+            ),
+            // Above the box rather than under it: under a tall paste they
+            // would land off screen, and these are what to fix in it.
+            if (_errors.isNotEmpty)
+              ErrorList(
+                errors: _errors,
+                tip: 'Paste these back to the model and ask it to fix them.',
+              ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _controller,
+              minLines: 10,
+              maxLines: 18,
+              // 'monospace' resolves only on some platforms, so name real
+              // families to fall back to rather than silently landing on the
+              // proportional default.
+              style: const TextStyle(
+                fontFamily: 'monospace',
+                fontFamilyFallback: [
+                  'Menlo',
+                  'Consolas',
+                  'DejaVu Sans Mono',
+                  'Courier New',
+                ],
+                fontSize: 13,
+                height: 1.45,
+              ),
+              decoration: const InputDecoration(
+                hintText: '{\n  "title": "…",\n  "base_servings": 4,\n  …\n}',
+              ),
+              onChanged: (_) {
+                if (_errors.isNotEmpty) setState(() => _errors = const []);
+              },
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// One numbered step of the import: a serif numeral in the margin, the way the
+/// recipe view numbers its method.
+class _Step extends StatelessWidget {
+  final int number;
+  final String title;
+  final Widget? action;
+  final List<Widget> children;
+
+  const _Step({
+    required this.number,
+    required this.title,
+    this.action,
+    required this.children,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 30,
+          child: Text(
+            '$number',
+            style: serif(
+              36,
+              height: 0.95,
+            ).copyWith(color: theme.colorScheme.primary),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(title, style: theme.textTheme.titleMedium),
+                  ),
+                  ?action,
+                ],
+              ),
+              const SizedBox(height: 4),
+              ...children,
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -155,19 +212,22 @@ class _ImportRecipeScreenState extends State<ImportRecipeScreen> {
 class ErrorList extends StatelessWidget {
   final List<String> errors;
 
-  const ErrorList({super.key, required this.errors});
+  /// What to do about them, where there is something better than "fix it".
+  final String? tip;
+
+  const ErrorList({super.key, required this.errors, this.tip});
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
     return Container(
-      constraints: const BoxConstraints(maxHeight: 200),
-      margin: const EdgeInsets.only(top: 12),
-      padding: const EdgeInsets.all(14),
+      constraints: const BoxConstraints(maxHeight: 240),
+      margin: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: colors.errorContainer,
         borderRadius: BorderRadius.circular(panelRadius),
-        border: Border.all(color: colors.error.withValues(alpha: 0.4)),
       ),
       child: SingleChildScrollView(
         child: Column(
@@ -176,23 +236,31 @@ class ErrorList extends StatelessWidget {
             Text(
               '${errors.length} problem${errors.length == 1 ? '' : 's'} — '
               'nothing was saved',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: colors.onErrorContainer,
-              ),
+              style: weighted(
+                theme.textTheme.bodyLarge,
+                FontWeight.w600,
+              )?.copyWith(color: colors.error),
             ),
             const SizedBox(height: 6),
             for (final error in errors)
               Padding(
-                padding: const EdgeInsets.only(top: 2),
+                padding: const EdgeInsets.only(top: 4),
                 child: Text(
                   '• $error',
-                  style: TextStyle(
+                  style: theme.textTheme.bodyMedium?.copyWith(
                     color: colors.onErrorContainer,
-                    fontSize: 13,
                   ),
                 ),
               ),
+            if (tip case final tip?) ...[
+              const SizedBox(height: 8),
+              Text(
+                tip,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
+              ),
+            ],
           ],
         ),
       ),

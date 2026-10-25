@@ -500,31 +500,43 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final accent = Theme.of(context).colorScheme.primary;
-    return GlassScaffold(
-      appBar: glassAppBar(context, title: const Text('Edit recipe')),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _save,
-        icon: const Icon(Icons.check),
-        label: const Text('Save version'),
+    final theme = Theme.of(context);
+    final accent = theme.colorScheme.primary;
+    return Scaffold(
+      appBar: AppBar(
+        leading: IconButton(
+          onPressed: () => Navigator.maybePop(context),
+          tooltip: 'Close without saving',
+          style: IconButton.styleFrom(backgroundColor: glassFill(context)),
+          icon: const Icon(Icons.arrow_back),
+        ),
+        centerTitle: true,
+        title: Text('Edit recipe', style: theme.textTheme.titleMedium),
+        flexibleSpace: barPane(context),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: FilledButton(
+              onPressed: _save,
+              style: FilledButton.styleFrom(
+                minimumSize: const Size(0, 44),
+                padding: const EdgeInsets.symmetric(horizontal: 18),
+              ),
+              child: const Text('Save version'),
+            ),
+          ),
+        ],
       ),
       body: ListView(
-        padding: EdgeInsets.fromLTRB(
-          16,
-          16 + glassAppBarInset(context),
-          16,
-          96,
-        ),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 48),
         children: [
-          SegmentedButton<bool>(
-            segments: const [
-              ButtonSegment(value: false, label: Text('Form')),
-              ButtonSegment(value: true, label: Text('JSON')),
-            ],
-            selected: {_jsonMode},
-            onSelectionChanged: (selection) => _setMode(selection.first),
+          Segmented(
+            expand: true,
+            options: const [(false, 'Form'), (true, 'JSON')],
+            selected: _jsonMode,
+            onChanged: _setMode,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 18),
           if (_errors.isNotEmpty) ...[
             ErrorList(errors: _errors),
             const SizedBox(height: 16),
@@ -554,66 +566,60 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
         fontSize: 13,
         height: 1.4,
       ),
-      decoration: const InputDecoration(border: OutlineInputBorder()),
     ),
   ];
 
   List<Widget> _formFields(Color accent) => [
-    TextField(
-      controller: _title,
-      textCapitalization: TextCapitalization.words,
-      decoration: const InputDecoration(
-        labelText: 'Title',
-        border: OutlineInputBorder(),
-      ),
-    ),
-    const SizedBox(height: 12),
-    // Directly under the title, because it is the recipe's face.
+    // First, because it is the recipe's face.
     _ImageField(
       controller: _imageUrls,
       store: widget.store,
       onPick: _pickImage,
+    ),
+    const SizedBox(height: 16),
+    TextField(
+      controller: _title,
+      textCapitalization: TextCapitalization.words,
+      style: serif(26, height: 1.2),
+      decoration: const InputDecoration(labelText: 'Title'),
     ),
     const SizedBox(height: 12),
     Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SizedBox(
-          width: 120,
+          width: 104,
           child: TextField(
             controller: _servings,
             keyboardType: TextInputType.number,
             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            decoration: const InputDecoration(
-              labelText: 'Serves',
-              border: OutlineInputBorder(),
-            ),
+            decoration: const InputDecoration(labelText: 'Serves'),
           ),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 10),
         Expanded(
           child: TextField(
             controller: _tags,
             decoration: const InputDecoration(
               labelText: 'Tags',
               helperText: 'Commas between',
-              border: OutlineInputBorder(),
             ),
           ),
         ),
       ],
     ),
     const SizedBox(height: 12),
-    // Up here rather than at the foot of the form, because this is where it
-    // prints: above the ingredients, the way a cookbook sets a headnote.
+    // Set the way it prints: the headnote, above the ingredients, in the
+    // italic the recipe view gives it.
     TextField(
       controller: _notes,
-      minLines: 2,
-      maxLines: 5,
+      minLines: 3,
+      maxLines: 7,
+      style: serif(19, height: 1.35, italic: true),
       decoration: const InputDecoration(
         labelText: 'Notes',
         helperText: 'Where it comes from, when to make it, what to swap',
-        border: OutlineInputBorder(),
+        alignLabelWithHint: true,
       ),
     ),
 
@@ -644,7 +650,14 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
         onToggle: () => setState(() => draft.expanded = !draft.expanded),
       ),
     _AddButton(label: 'Add step', onPressed: _addStep),
-
+    const SizedBox(height: 12),
+    Text(
+      'Saving keeps this as a new version — the one before it stays in '
+      'History with its own cook log.',
+      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
+    ),
   ];
 }
 
@@ -734,14 +747,13 @@ class _ImageFieldState extends State<_ImageField> {
             onTap: widget.onPick,
             borderRadius: BorderRadius.circular(pillRadius),
             child: Container(
-              width: 72,
-              height: 72,
+              width: 84,
+              height: 84,
               alignment: Alignment.center,
               clipBehavior: Clip.antiAlias,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(pillRadius),
                 color: glassFill(context),
-                border: Border.all(color: glassRim(context)),
               ),
               // The preview is the reason this lives in the form at all: urls
               // that all lead nowhere show themselves here, before saving,
@@ -800,7 +812,6 @@ class _ImageFieldState extends State<_ImageField> {
                       ? 'Optional — one link per line, or tap'
                       : 'None of these loaded'),
               isDense: true,
-              border: const OutlineInputBorder(),
             ),
           ),
         ),
@@ -958,13 +969,21 @@ class _SectionHeading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.only(top: 28, bottom: 10),
+      padding: const EdgeInsets.only(top: 30, bottom: 6),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.baseline,
+        textBaseline: TextBaseline.alphabetic,
         children: [
-          Text(label, style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(width: 8),
-          Text('$count', style: Theme.of(context).textTheme.bodySmall),
+          Text(label, style: theme.textTheme.headlineSmall),
+          const SizedBox(width: 10),
+          Text(
+            '$count',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
         ],
       ),
     );
@@ -1008,10 +1027,12 @@ class _IngredientRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GlassPanel(
-      margin: const EdgeInsets.only(bottom: 10),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: glassRim(context))),
+      ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 12, 4, 12),
+        padding: const EdgeInsets.fromLTRB(0, 10, 0, 10),
         child: Column(
           children: [
             Row(
@@ -1023,7 +1044,6 @@ class _IngredientRow extends StatelessWidget {
                     decoration: const InputDecoration(
                       labelText: 'Ingredient',
                       isDense: true,
-                      border: OutlineInputBorder(),
                     ),
                   ),
                 ),
@@ -1034,9 +1054,9 @@ class _IngredientRow extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 10),
+            const SizedBox(height: 8),
             Padding(
-              padding: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsets.only(right: 48),
               child: Row(
                 children: [
                   Expanded(
@@ -1051,7 +1071,6 @@ class _IngredientRow extends StatelessWidget {
                       decoration: const InputDecoration(
                         labelText: 'Amount',
                         isDense: true,
-                        border: OutlineInputBorder(),
                       ),
                     ),
                   ),
@@ -1066,9 +1085,9 @@ class _IngredientRow extends StatelessWidget {
             // phone leaves none of them readable. Absent entirely for units
             // that could never convert, where a density means nothing.
             if (unitConverts(draft.unit)) ...[
-              const SizedBox(height: 10),
+              const SizedBox(height: 8),
               Padding(
-                padding: const EdgeInsets.only(right: 8),
+                padding: const EdgeInsets.only(right: 48),
                 child: TextField(
                   controller: draft.density,
                   keyboardType: const TextInputType.numberWithOptions(
@@ -1079,11 +1098,11 @@ class _IngredientRow extends StatelessWidget {
                   ],
                   decoration: const InputDecoration(
                     labelText: 'Density (g/ml)',
+                    helperMaxLines: 2,
                     helperText:
                         'Optional — lets this switch between weight '
                         'and volume',
                     isDense: true,
-                    border: OutlineInputBorder(),
                   ),
                 ),
               ),
@@ -1113,11 +1132,7 @@ class _UnitFieldState extends State<_UnitField> {
     return DropdownButtonFormField<Unit?>(
       initialValue: widget.draft.unit,
       isExpanded: true,
-      decoration: const InputDecoration(
-        labelText: 'Unit',
-        isDense: true,
-        border: OutlineInputBorder(),
-      ),
+      decoration: const InputDecoration(labelText: 'Unit', isDense: true),
       items: [
         const DropdownMenuItem(value: null, child: Text('whole')),
         for (final unit in Unit.values)
@@ -1153,96 +1168,113 @@ class _StepCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return GlassPanel(
-      margin: const EdgeInsets.only(bottom: 10),
-      child: Column(
-        children: [
-          InkWell(
-            onTap: onToggle,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
-              child: Row(
-                children: [
-                  CircleAvatar(
-                    radius: 14,
-                    backgroundColor: accent,
-                    child: Text(
-                      '$number',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: onAccent(accent),
+    final scheme = theme.colorScheme;
+    // Open, it is a card on the page ringed in the accent; shut, a single
+    // line on the wash.
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(panelRadius),
+      side: draft.expanded
+          ? BorderSide(color: accent, width: 1.5)
+          : BorderSide.none,
+    );
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        shape: shape,
+        clipBehavior: Clip.antiAlias,
+        color: draft.expanded ? scheme.surface : glassFill(context),
+        child: Column(
+          children: [
+            InkWell(
+              onTap: onToggle,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 6, 4, 6),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 26,
+                      child: Text(
+                        '$number',
+                        style: serif(30, height: 1).copyWith(color: accent),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      draft.title.text.isEmpty
-                          ? 'Untitled step'
-                          : draft.title.text,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.titleMedium,
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        draft.title.text.isEmpty
+                            ? 'Untitled step'
+                            : draft.title.text,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium,
+                      ),
                     ),
-                  ),
-                  IconButton(
-                    onPressed: onRemove,
-                    tooltip: 'Remove step',
-                    icon: const Icon(Icons.close),
-                  ),
-                  Icon(draft.expanded ? Icons.expand_less : Icons.expand_more),
-                ],
+                    if (!draft.expanded && draft.seconds != null)
+                      Text(
+                        formatDuration(draft.seconds!),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    IconButton(
+                      onPressed: onRemove,
+                      tooltip: 'Remove step',
+                      icon: const Icon(Icons.close),
+                    ),
+                    Icon(
+                      draft.expanded ? Icons.expand_less : Icons.expand_more,
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                ),
               ),
             ),
-          ),
-          if (draft.expanded)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  TextField(
-                    controller: draft.title,
-                    decoration: const InputDecoration(
-                      labelText: 'Title',
-                      isDense: true,
-                      border: OutlineInputBorder(),
+            if (draft.expanded)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    TextField(
+                      controller: draft.title,
+                      decoration: const InputDecoration(
+                        labelText: 'Title',
+                        isDense: true,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: draft.content,
-                    minLines: 3,
-                    maxLines: 8,
-                    decoration: const InputDecoration(
-                      labelText: 'What to do',
-                      isDense: true,
-                      border: OutlineInputBorder(),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: draft.content,
+                      minLines: 3,
+                      maxLines: 8,
+                      decoration: const InputDecoration(
+                        labelText: 'What to do',
+                        isDense: true,
+                        alignLabelWithHint: true,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  _InsertBar(names: names, controller: draft.content),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: draft.timer,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
+                    const SizedBox(height: 10),
+                    _InsertBar(names: names, controller: draft.content),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: draft.timer,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                      ],
+                      decoration: const InputDecoration(
+                        labelText: 'Timer (minutes)',
+                        helperText: 'Empty if the step involves no waiting',
+                        isDense: true,
+                      ),
                     ),
-                    inputFormatters: [
-                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                    ],
-                    decoration: const InputDecoration(
-                      labelText: 'Timer (minutes)',
-                      helperText: 'Empty if the step involves no waiting',
-                      isDense: true,
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1272,29 +1304,42 @@ class _InsertBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final usable = [
       for (final name in names)
         if (name.isNotEmpty) name,
     ];
     if (usable.isEmpty) return const SizedBox.shrink();
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            for (final name in usable)
-              Padding(
-                padding: const EdgeInsets.only(right: 6),
-                child: ActionChip(
-                  avatar: const Icon(Icons.add, size: 16),
-                  label: Text(name),
-                  onPressed: () => _insert(name),
-                ),
-              ),
-          ],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Insert an ingredient — its amount scales with servings',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
         ),
-      ),
+        const SizedBox(height: 6),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              for (final name in usable)
+                Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: ActionChip(
+                    avatar: const Icon(Icons.add, size: 16),
+                    label: Text(name),
+                    backgroundColor: theme.colorScheme.surface,
+                    side: BorderSide(color: glassRim(context)),
+                    shape: const StadiumBorder(),
+                    onPressed: () => _insert(name),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

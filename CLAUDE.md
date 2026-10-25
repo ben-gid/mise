@@ -345,6 +345,19 @@ referenced photo the account lacks and downloads each one the phone lacks, so a 
 download is retried by the next run. Storage objects don't cascade from `auth.users`, so
 `DELETE /me` empties the folder before it deletes the user.
 
+**A step timer is an end time, not a countdown.** `timers` in
+[lib/recipe/recipe_timers.dart](lib/recipe/recipe_timers.dart) is a global
+`ValueNotifier` of `<versionId>/<stepId>` → when it ends, and the step's button reads
+the time left off the wall clock each second. A phone locks and the app is
+suspended mid-proof; a countdown kept in memory would come back wrong. Starting one
+also schedules a local notification for its end, because two hours later the app is
+not what's open. The plugin exists only on Android and iOS, so the desktop harness and
+`flutter test` count down on screen and notify nobody — the empty-`PHOTO_PROXY` rule.
+Permission is asked on the first timer, not at launch. Android 14 denies exact alarms
+to new installs by default, so it schedules exact when allowed and inexact (can land
+minutes late) when not. Timers are in memory only: if the process dies the
+notification still fires but the step shows Start again.
+
 **No state management package and none wanted** — three screens over one store, plain
 `StatefulWidget` + `setState`, `Navigator.push` between them. The store and parser are
 constructed once in `main()` and passed down by constructor.
@@ -419,10 +432,19 @@ constructed once in `main()` and passed down by constructor.
   reaches zero at the end of that animation; unguarded it puts a NaN straight
   into the opacity.
 - The look is "Spread" ([lib/recipe/ui/glass.dart](lib/recipe/ui/glass.dart) kept its
-  old name and `glass*` helpers so unredrawn screens compile; they paint flat now).
+  old name and `glass*` helpers, which paint flat now). Every screen but the recipe
+  view and the editor is a `SpreadPage`: no app bar, a round back button, the
+  title set large. Its `bottom` pins the page's one action above the keyboard.
   Geist is one variable file, and a variable font ignores `FontWeight` unless the
   `wght` axis matches — change a weight through `weighted()`, not a bare `copyWith`.
   Geist has no `★` glyph either; draw a star with `Icons.star` in a `WidgetSpan`.
+- A running step timer repaints every second, so a test that starts one must `pump`,
+  never `pumpAndSettle`, and must cancel it before it ends. `widget_test.dart`'s
+  `tearDown` clears `timers`, which is a global and outlives a test.
+- The notification icon is named by string (`ic_launcher_monochrome`), which
+  resource shrinking can't see; `android/app/src/main/res/raw/keep.xml` is what
+  keeps a release build from stripping it. The plugin also needs core library
+  desugaring in `build.gradle.kts` and its two receivers in the manifest.
 - `flutter_test` sets `debugDisableShadows`, so a rendered screenshot shows every
   elevated widget (the FAB, the action pills) with a black outline. It isn't real.
 - `SharePlus.instance.share` needs a `sharePositionOrigin` rect or it throws on iPad, where
