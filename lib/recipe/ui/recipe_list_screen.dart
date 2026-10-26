@@ -129,7 +129,6 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
           if (!snapshot.hasData) return const SizedBox.shrink();
           final recipes = snapshot.data!;
           if (recipes.isEmpty) return _EmptyState(appBarInset: appBarInset);
-          final colors = Theme.of(context).colorScheme;
           // Sync already runs on launch, resume and every save; this is for
           // the cook standing at a second phone who doesn't want to wait.
           return RefreshIndicator(
@@ -144,24 +143,15 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
               itemCount: recipes.length,
               itemBuilder: (context, index) {
                 final saved = recipes[index];
-                return Dismissible(
+                return _RecipeRow(
                   key: ValueKey(saved.$1),
-                  direction: DismissDirection.endToStart,
-                  background: Container(
-                    alignment: Alignment.centerRight,
-                    padding: const EdgeInsets.only(right: 24),
-                    color: colors.error.withValues(alpha: 0.22),
-                    child: Icon(Icons.delete_outline, color: colors.error),
-                  ),
-                  onDismissed: (_) => _delete(saved),
-                  child: _RecipeRow(
-                    saved: saved,
-                    store: widget.store,
-                    parser: widget.parser,
-                    onReturn: _reload,
-                    // The sheet's own bottom edge closes the last row.
-                    ruled: index < recipes.length - 1,
-                  ),
+                  saved: saved,
+                  store: widget.store,
+                  parser: widget.parser,
+                  onReturn: _reload,
+                  onDelete: () => _delete(saved),
+                  // The sheet's own bottom edge closes the last row.
+                  ruled: index < recipes.length - 1,
                 );
               },
             ),
@@ -192,13 +182,40 @@ class _RecipeRow extends StatelessWidget {
   /// version under a new id, which this row does not know about.
   final VoidCallback onReturn;
 
+  final VoidCallback onDelete;
+
   const _RecipeRow({
+    super.key,
     required this.saved,
     required this.store,
     required this.parser,
     required this.ruled,
     required this.onReturn,
+    required this.onDelete,
   });
+
+  /// Long-press rather than swipe: a swipe across a row is too easy to make
+  /// by accident with one floury thumb. The menu is anchored on the row.
+  Future<void> _showMenu(BuildContext context) async {
+    final row = context.findRenderObject()! as RenderBox;
+    final overlay =
+        Overlay.of(context).context.findRenderObject()! as RenderBox;
+    final rect = row.localToGlobal(Offset.zero, ancestor: overlay) & row.size;
+    final choice = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromRect(rect, Offset.zero & overlay.size),
+      items: const [
+        PopupMenuItem(
+          value: 'delete',
+          child: ListTile(
+            leading: Icon(Icons.delete_outline),
+            title: Text('Delete'),
+          ),
+        ),
+      ],
+    );
+    if (choice == 'delete') onDelete();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -224,6 +241,7 @@ class _RecipeRow extends StatelessWidget {
           );
           onReturn();
         },
+        onLongPress: () => _showMenu(context),
         child: Column(
           children: [
             Padding(

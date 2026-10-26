@@ -129,6 +129,34 @@ void main() {
     expect(find.text('bread'), findsOneWidget); // tag chip
   });
 
+  testWidgets(
+    'long-pressing a row deletes it from the menu, and Undo restores',
+    (tester) async {
+      await tester.runAsync(() => store.save(parser.parse(validJson)));
+      await pumpList(tester);
+
+      await tester.longPress(find.text('Garlic Butter Focaccia'));
+      await tester.pumpAndSettle();
+      await tester.runAsync(() async {
+        await tester.tap(find.text('Delete'));
+        await pumpUntil(
+          tester,
+          () => find.text('No recipes yet').evaluate().isNotEmpty,
+        );
+      });
+      expect(await tester.runAsync(store.loadAll), isEmpty);
+      await tester.pumpAndSettle(); // the SnackBar slides in
+
+      await tester.runAsync(() async {
+        await tester.tap(find.text('Undo'));
+        await pumpUntil(
+          tester,
+          () => find.text('Garlic Butter Focaccia').evaluate().isNotEmpty,
+        );
+      });
+    },
+  );
+
   testWidgets('importing valid JSON saves it and opens the recipe', (
     tester,
   ) async {
@@ -361,14 +389,14 @@ void main() {
     expect(find.text('Photos from Pexels'), findsOneWidget);
 
     await tester.tap(
-      find.descendant(of: find.byType(GridView), matching: find.byType(InkWell)),
+      find.descendant(
+        of: find.byType(GridView),
+        matching: find.byType(InkWell),
+      ),
     );
     await tester.pumpAndSettle();
     await tester.runAsync(
-      () => pumpUntil(
-        tester,
-        () => savedWith('mise://other.png'),
-      ),
+      () => pumpUntil(tester, () => savedWith('mise://other.png')),
     );
 
     expect(onDisk().imageUrls, ['mise://other.png']);
@@ -1074,6 +1102,7 @@ void main() {
       final all = await store.loadAll();
       return all.length == 1 ? (await store.history(all.single.$1)).length : 0;
     }
+
     await tester.runAsync(() async {
       await tester.tap(find.text('Undo these changes').at(1));
       for (var i = 0; i < 100 && await versions() < 4; i++) {
@@ -1184,7 +1213,9 @@ void main() {
       findsOneWidget,
     );
     await tester.tap(
-      find.descendant(of: dialog, matching: find.byIcon(Icons.star_border)).at(3),
+      find
+          .descendant(of: dialog, matching: find.byIcon(Icons.star_border))
+          .at(3),
     );
     await tester.enterText(
       find.descendant(of: dialog, matching: find.byType(TextField)),
@@ -1231,9 +1262,7 @@ void main() {
     expect(find.byIcon(Icons.star), findsNothing);
   });
 
-  testWidgets('a long log shows the newest two until Show all', (
-    tester,
-  ) async {
+  testWidgets('a long log shows the newest two until Show all', (tester) async {
     tallSurface(tester);
     await pumpDetail(
       tester,
