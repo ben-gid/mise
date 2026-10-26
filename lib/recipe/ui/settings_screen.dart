@@ -9,8 +9,8 @@ import '../recipe_store.dart';
 import '../recipe_units.dart';
 import 'glass.dart';
 
-/// Settings. Theme, then the display units, then the account when this build
-/// has one — another one goes in as another panel under these.
+/// Settings. Appearance, then the display units, then the account when this
+/// build has one — another group goes in under these with its own label.
 class SettingsScreen extends StatefulWidget {
   final RecipeStore store;
 
@@ -21,11 +21,11 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  static const _modes = {
-    ThemeMode.light: ('Light', Icons.light_mode_outlined),
-    ThemeMode.dark: ('Dark', Icons.dark_mode_outlined),
-    ThemeMode.system: ('Auto', Icons.brightness_auto_outlined),
-  };
+  static const _modes = [
+    (ThemeMode.light, 'Light'),
+    (ThemeMode.dark, 'Dark'),
+    (ThemeMode.system, 'Auto'),
+  ];
 
   void _pick(ThemeMode mode) {
     setState(() => themeMode.value = mode);
@@ -51,120 +51,199 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return GlassScaffold(
-      appBar: glassAppBar(context, title: const Text('Settings')),
-      body: ListView(
-        padding: EdgeInsets.only(
-          top: glassAppBarInset(context) + 8,
-          bottom: 24,
-        ),
-        children: [
-          _heading('Theme'),
-          _panel([
-            for (final entry in _modes.entries)
-              // ListTile, not RadioListTile: same one-tap behaviour, and it
-              // keeps the row a plain finger-sized target.
-              ListTile(
-                leading: Icon(entry.value.$2),
-                title: Text(entry.value.$1),
-                trailing: _check(entry.key == themeMode.value),
-                onTap: () => _pick(entry.key),
-              ),
-          ]),
-          _heading('Weight'),
-          _units(weightSystem, metric: 'g', imperial: 'oz · lb'),
-          _heading('Volume'),
-          _units(volumeSystem, metric: 'ml', imperial: 'tsp · tbsp · cup'),
-          _heading('Measure by'),
-          _panel([
-            for (final (by, label, example) in const [
-              (
-                MeasureBy.asWritten,
-                'As written',
-                'However each recipe saved it',
-              ),
-              (MeasureBy.weight, 'Weight', 'On a scale wherever it can be'),
-              (
-                MeasureBy.volume,
-                'Volume',
-                'In cups and spoons wherever it can be',
-              ),
-            ])
-              ListTile(
-                title: Text(label),
-                subtitle: Text(example),
-                trailing: _check(by == measureBy.value),
-                onTap: () => _pickMeasure(by),
-              ),
-          ]),
-          const Padding(
-            padding: EdgeInsets.fromLTRB(28, 16, 28, 0),
-            child: Text(
-              'Recipes are stored as written and converted for display, '
-              'rounded to measurements you can actually scoop. Switching '
-              'between weight and volume needs a known density, so some '
-              'ingredients stay as written. Tap any amount to switch just '
-              'that one.',
-            ),
+    final theme = Theme.of(context);
+    return SpreadPage(
+      title: 'Settings',
+      children: [
+        const SectionLabel('Appearance'),
+        _row(
+          'Theme',
+          Segmented(
+            options: _modes,
+            selected: themeMode.value,
+            onChanged: _pick,
           ),
-          // Last, not first: the app works the same signed in or not, and a
-          // sign-in panel at the top of Settings reads as a gate.
-          if (accountsOn) ...[
-            _heading('Account'),
-            ValueListenableBuilder(
-              valueListenable: account,
-              builder: (context, current, _) => _account(current),
-            ),
-          ],
+        ),
+        const SizedBox(height: 28),
+        const SectionLabel('Units'),
+        _units('Weight', weightSystem, metric: 'g', imperial: 'oz · lb'),
+        _units(
+          'Volume',
+          volumeSystem,
+          metric: 'ml',
+          imperial: 'tsp · tbsp · cup',
+        ),
+        const SizedBox(height: 20),
+        Text('Measure by', style: theme.textTheme.bodyLarge),
+        const SizedBox(height: 8),
+        for (final (by, label, example) in const [
+          (MeasureBy.asWritten, 'As written', 'However each recipe saved it'),
+          (MeasureBy.weight, 'Weight', 'On a scale wherever it can be'),
+          (
+            MeasureBy.volume,
+            'Volume',
+            'In cups and spoons wherever it can be',
+          ),
+        ])
+          _Choice(
+            label: label,
+            example: example,
+            selected: by == measureBy.value,
+            onTap: () => _pickMeasure(by),
+          ),
+        const SizedBox(height: 8),
+        Text(
+          'Recipes are stored as written and converted for display, rounded '
+          'to measurements you can actually scoop. Switching between weight '
+          'and volume needs a known density, so some ingredients stay as '
+          'written. Tap any amount to switch just that one.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        // Last, not first: the app works the same signed in or not, and a
+        // sign-in panel at the top of Settings reads as a gate.
+        if (accountsOn) ...[
+          const SizedBox(height: 28),
+          const SectionLabel('Account'),
+          const SizedBox(height: 12),
+          ValueListenableBuilder(
+            valueListenable: account,
+            builder: (context, current, _) => _account(current),
+          ),
+        ],
+      ],
+    );
+  }
+
+  /// A label on the left and its control on the right, wrapping under it
+  /// when a large system font leaves no room beside.
+  Widget _row(String label, Widget control, {String? hint}) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 12,
+        runSpacing: 8,
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(label, style: theme.textTheme.bodyLarge),
+              if (hint != null)
+                Text(
+                  hint,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+            ],
+          ),
+          control,
         ],
       ),
     );
   }
 
+  /// The units a system reads in go under the label — "Metric" alone doesn't
+  /// tell you whether flour comes out in grams.
+  Widget _units(
+    String label,
+    ValueNotifier<UnitSystem> setting, {
+    required String metric,
+    required String imperial,
+  }) => _row(
+    label,
+    Segmented(
+      options: const [
+        (UnitSystem.metric, 'Metric'),
+        (UnitSystem.imperial, 'US'),
+      ],
+      selected: setting.value,
+      onChanged: (system) => _pickUnit(setting, system),
+    ),
+    hint: setting.value == UnitSystem.metric ? metric : imperial,
+  );
+
   Widget _account(Account? current) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
     final email = current?.email;
-    if (email == null) {
-      return _panel([
-        const ListTile(
-          title: Text('Not signed in'),
-          subtitle: Text(
-            'Sign in to keep your recipes when you change phones. '
-            'Everything works without it.',
-          ),
+    final outlined = OutlinedButton.styleFrom(
+      minimumSize: const Size.fromHeight(50),
+      side: BorderSide(color: glassRim(context)),
+      foregroundColor: scheme.onSurface,
+      backgroundColor: scheme.surface,
+    );
+    return GlassPanel(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: email == null
+              ? [
+                  Text('Not signed in', style: serif(26, height: 1.1)),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Sign in to keep your recipes when you change phones. '
+                    'Everything works without it.',
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 14),
+                  OutlinedButton(
+                    style: outlined,
+                    onPressed: () => _run(signInWithGoogle),
+                    child: const Text('Continue with Google'),
+                  ),
+                  // Apple's own rule: offering Google on iOS means offering
+                  // Apple too.
+                  if (Platform.isIOS) ...[
+                    const SizedBox(height: 10),
+                    FilledButton(
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size.fromHeight(50),
+                        backgroundColor: scheme.onSurface,
+                        foregroundColor: scheme.surface,
+                      ),
+                      onPressed: () => _run(signInWithApple),
+                      child: const Text('Continue with Apple'),
+                    ),
+                  ],
+                ]
+              : [
+                  Text(email, style: serif(24, height: 1.15)),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Signed in · recipes sync',
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 14),
+                  OutlinedButton(
+                    style: outlined,
+                    onPressed: () => _run(signOut),
+                    child: const Text('Sign out'),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Your recipes stay on this phone either way.',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  TextButton(
+                    style: TextButton.styleFrom(foregroundColor: scheme.error),
+                    onPressed: _confirmDelete,
+                    child: const Text('Delete account'),
+                  ),
+                ],
         ),
-        ListTile(
-          leading: const Icon(Icons.login),
-          title: const Text('Continue with Google'),
-          onTap: () => _run(signInWithGoogle),
-        ),
-        // Apple's own rule: offering Google on iOS means offering Apple too.
-        if (Platform.isIOS)
-          ListTile(
-            leading: const Icon(Icons.apple),
-            title: const Text('Continue with Apple'),
-            onTap: () => _run(signInWithApple),
-          ),
-      ]);
-    }
-    final danger = Theme.of(context).colorScheme.error;
-    return _panel([
-      ListTile(
-        leading: const Icon(Icons.account_circle_outlined),
-        title: Text(email),
-        subtitle: const Text('Signed in · recipes sync'),
       ),
-      ListTile(
-        leading: const Icon(Icons.logout),
-        title: const Text('Sign out'),
-        subtitle: const Text('Your recipes stay on this phone'),
-        onTap: () => _run(signOut),
-      ),
-      ListTile(
-        leading: Icon(Icons.delete_outline, color: danger),
-        title: Text('Delete account', style: TextStyle(color: danger)),
-        onTap: _confirmDelete,
-      ),
-    ]);
+    );
   }
 
   Future<void> _confirmDelete() async {
@@ -182,6 +261,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: const Text('Keep it'),
           ),
           FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Delete'),
           ),
@@ -215,37 +298,81 @@ class _SettingsScreenState extends State<SettingsScreen> {
       );
     }
   }
+}
 
-  /// The units the system reads in go in the subtitle rather than the title —
-  /// "Metric" alone doesn't tell you whether flour comes out in grams.
-  Widget _units(
-    ValueNotifier<UnitSystem> setting, {
-    required String metric,
-    required String imperial,
-  }) => _panel([
-    for (final (system, example) in [
-      (UnitSystem.metric, metric),
-      (UnitSystem.imperial, imperial),
-    ])
-      ListTile(
-        title: Text(system == UnitSystem.metric ? 'Metric' : 'US'),
-        subtitle: Text(example),
-        trailing: _check(system == setting.value),
-        onTap: () => _pickUnit(setting, system),
+/// One option in a one-of-three list, as a card the width of the page: the
+/// selected one carries the accent border and a filled dot.
+class _Choice extends StatelessWidget {
+  final String label;
+  final String example;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _Choice({
+    required this.label,
+    required this.example,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(16),
+      side: BorderSide(
+        color: selected ? scheme.primary : glassRim(context),
+        width: selected ? 1.5 : 1,
       ),
-  ]);
-
-  Widget _heading(String text) => Padding(
-    padding: const EdgeInsets.fromLTRB(28, 16, 28, 8),
-    child: Text(text, style: Theme.of(context).textTheme.titleSmall),
-  );
-
-  Widget _panel(List<Widget> children) => GlassPanel(
-    margin: const EdgeInsets.symmetric(horizontal: 16),
-    child: Column(children: children),
-  );
-
-  Widget? _check(bool selected) => selected
-      ? Icon(Icons.check, color: Theme.of(context).colorScheme.primary)
-      : null;
+    );
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Semantics(
+        selected: selected,
+        inMutuallyExclusiveGroup: true,
+        child: Material(
+          shape: shape,
+          color: selected ? herbWash(context) : scheme.surface,
+          child: InkWell(
+            customBorder: shape,
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(
+                children: [
+                  Container(
+                    width: 20,
+                    height: 20,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: selected ? scheme.primary : scheme.outline,
+                        width: selected ? 6 : 1.5,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(label, style: theme.textTheme.titleSmall),
+                        Text(
+                          example,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

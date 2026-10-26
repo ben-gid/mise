@@ -7,6 +7,7 @@ import 'package:mise/recipe/recipe_models.dart';
 import 'package:mise/recipe/recipe_image.dart';
 import 'package:mise/recipe/recipe_parser.dart';
 import 'package:mise/recipe/recipe_store.dart';
+import 'package:mise/recipe/recipe_timers.dart';
 import 'package:mise/recipe/recipe_units.dart';
 import 'package:mise/recipe/ui/cook_log.dart';
 import 'package:mise/recipe/ui/recipe_detail_screen.dart';
@@ -34,6 +35,7 @@ void main() {
     // A photo search seeded by one test would otherwise surface in every
     // recipe the tests after it open.
     forgetPexels();
+    timers.value = const {};
   });
 
   /// Pumps inside [tester.runAsync] until [ready], which must describe what the
@@ -102,7 +104,7 @@ void main() {
       await pumpUntil(
         tester,
         () =>
-            find.byType(ListView).evaluate().isNotEmpty ||
+            find.byType(CustomScrollView).evaluate().isNotEmpty ||
             find.text('No recipes yet').evaluate().isNotEmpty,
       );
     });
@@ -110,7 +112,7 @@ void main() {
   }
 
   Future<void> openImport(WidgetTester tester) async {
-    await tester.tap(find.widgetWithText(FloatingActionButton, 'Import'));
+    await tester.tap(find.widgetWithText(FloatingActionButton, 'Import recipe'));
     await tester.pumpAndSettle();
   }
 
@@ -126,7 +128,7 @@ void main() {
 
     expect(find.text('Garlic Butter Focaccia'), findsOneWidget);
     expect(find.textContaining('4 servings'), findsOneWidget);
-    expect(find.text('bread'), findsOneWidget); // tag chip
+    expect(find.textContaining('bread'), findsOneWidget); // first tag
   });
 
   testWidgets(
@@ -172,7 +174,7 @@ void main() {
     });
     await tester.pumpAndSettle();
 
-    expect(find.text('Ingredients'), findsOneWidget); // on the detail screen
+    expect(find.text('Mise en place'), findsOneWidget); // on the detail screen
     final saved = await tester.runAsync(store.loadAll);
     expect(saved, hasLength(1));
   });
@@ -512,7 +514,7 @@ void main() {
     // title rather than three screens below it.
     expect(
       tester.getTopLeft(find.text('bread')).dy,
-      lessThan(tester.getTopLeft(find.text('Ingredients')).dy),
+      lessThan(tester.getTopLeft(find.text('Mise en place')).dy),
     );
   });
 
@@ -524,7 +526,7 @@ void main() {
 
     expect(
       tester.getTopLeft(find.textContaining('A slow-proofed focaccia')).dy,
-      lessThan(tester.getTopLeft(find.text('Ingredients')).dy),
+      lessThan(tester.getTopLeft(find.text('Mise en place')).dy),
     );
   });
 
@@ -715,6 +717,23 @@ void main() {
     expect(find.textContaining('No fixed size for flaky salt'), findsOneWidget);
   });
 
+  testWidgets('a step timer counts down and can be cancelled', (tester) async {
+    tallSurface(tester);
+    await pumpDetail(tester);
+    await scrollTo(tester, find.text('Start 5 min timer'));
+
+    await tester.tap(find.text('Start 5 min timer'));
+    // pump, not pumpAndSettle: a running timer repaints every second.
+    await tester.pump();
+    // Read off the wall clock, so the whole five minutes or a second under.
+    expect(find.textContaining(RegExp(r'^(5:00|4:59)$')), findsOneWidget);
+    expect(find.text('Start 5 min timer'), findsNothing);
+
+    await tester.tap(find.byTooltip('Cancel timer'));
+    await tester.pump();
+    expect(find.text('Start 5 min timer'), findsOneWidget);
+  });
+
   /// Opens the editor from the detail screen and waits for its fields.
   ///
   /// On a tall surface, because the headnote field now leads the form and a
@@ -737,7 +756,7 @@ void main() {
   Future<void> saveVersion(WidgetTester tester, String expectTitle) async {
     await tester.runAsync(() async {
       await tester.tap(
-        find.widgetWithText(FloatingActionButton, 'Save version'),
+        find.widgetWithText(FilledButton, 'Save version'),
       );
       await pumpUntil(
         tester,
@@ -904,12 +923,12 @@ void main() {
 
     // The first close icon is the first ingredient's remove button — below the
     // fold in a test viewport, since the image field sits above the list.
-    await scrollTo(tester, find.byIcon(Icons.close).first);
+    await scrollTo(tester, find.byTooltip('Remove ingredient').first);
     // Same as the pinch row above: scrollUntilVisible stops as soon as it is on
     // screen, which is underneath the app bar the body scrolls behind.
     await tester.drag(find.byType(Scrollable).first, const Offset(0, 140));
     await tester.pumpAndSettle();
-    await tester.tap(find.byIcon(Icons.close).first);
+    await tester.tap(find.byTooltip('Remove ingredient').first);
     await tester.pumpAndSettle();
     expect(find.textContaining('step 1'), findsOneWidget);
 
@@ -951,7 +970,7 @@ void main() {
     await openEditor(tester);
     await enterJson(tester, withUnusedIngredient());
 
-    await tester.tap(find.widgetWithText(FloatingActionButton, 'Save version'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Save version'));
     await tester.pumpAndSettle();
 
     expect(find.text('One ingredient is never used'), findsOneWidget);
@@ -971,7 +990,7 @@ void main() {
     await openEditor(tester);
     await enterJson(tester, withUnusedIngredient());
 
-    await tester.tap(find.widgetWithText(FloatingActionButton, 'Save version'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Save version'));
     await tester.pumpAndSettle();
     await tester.runAsync(() async {
       await tester.tap(find.text('Remove it'));
@@ -988,7 +1007,7 @@ void main() {
     // ...and the other way: keep it despite the warning.
     await openEditor(tester);
     await enterJson(tester, withUnusedIngredient());
-    await tester.tap(find.widgetWithText(FloatingActionButton, 'Save version'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Save version'));
     await tester.pumpAndSettle();
     await tester.runAsync(() async {
       await tester.tap(find.text('Save anyway'));
@@ -1012,7 +1031,7 @@ void main() {
       find.widgetWithText(TextField, 'Ingredient').first,
       '',
     );
-    await tester.tap(find.widgetWithText(FloatingActionButton, 'Save version'));
+    await tester.tap(find.widgetWithText(FilledButton, 'Save version'));
     await tester.pumpAndSettle();
 
     expect(find.textContaining('[bread flour]'), findsWidgets);
@@ -1067,7 +1086,7 @@ void main() {
       );
       await pumpUntil(
         tester,
-        () => find.text('Ingredients').evaluate().isNotEmpty,
+        () => find.text('Mise en place').evaluate().isNotEmpty,
       );
     });
     await tester.pumpAndSettle();
@@ -1182,6 +1201,7 @@ void main() {
     addTearDown(tester.view.reset);
     await pumpDetail(tester);
 
+    await scrollTo(tester, find.text('I made it'));
     await tester.tap(find.text('I made it'));
     await tester.pumpAndSettle();
 
@@ -1204,6 +1224,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.byIcon(Icons.add));
     await tester.pump();
+    await scrollTo(tester, find.text('I made it'));
     await tester.tap(find.text('I made it'));
     await tester.pumpAndSettle();
 
@@ -1229,7 +1250,7 @@ void main() {
     });
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('for 6'), findsOneWidget);
+    expect(find.textContaining('Served 6'), findsOneWidget);
 
     // Reopen from disk, waiting for the stored entry rather than just the body.
     await pumpDetail(
@@ -1237,9 +1258,9 @@ void main() {
       ready: () => find.text('Halve the garlic').evaluate().isNotEmpty,
     );
 
-    expect(find.textContaining('for 6'), findsOneWidget);
-    // The headline's four and the entry's own four.
-    expect(find.byIcon(Icons.star), findsNWidgets(8));
+    expect(find.textContaining('Served 6'), findsOneWidget);
+    // The headline's one, beside its figure, and the entry's own four.
+    expect(find.byIcon(Icons.star), findsNWidgets(5));
   });
 
   testWidgets('an entry can be deleted from its dialog', (tester) async {
@@ -1250,6 +1271,7 @@ void main() {
       seed: (id) => store.saveEntry(id, cooked(stars: 4, note: 'crisp')),
     );
 
+    await scrollTo(tester, find.text('crisp'));
     await tester.tap(find.text('crisp'));
     await tester.pumpAndSettle();
     await tester.runAsync(() async {
@@ -1278,6 +1300,7 @@ void main() {
     expect(find.text('second'), findsOneWidget);
     expect(find.text('first'), findsNothing);
 
+    await scrollTo(tester, find.text('Show all (3)'));
     await tester.tap(find.text('Show all (3)'));
     await tester.pumpAndSettle();
 

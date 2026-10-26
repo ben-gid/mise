@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- recipe_timers.dart names this icon by string, which resource shrinking
+     can't see, so a release build would strip it and the timer notification
+     would fail to post. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/ic_launcher_monochrome" />

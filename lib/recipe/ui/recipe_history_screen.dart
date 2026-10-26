@@ -121,31 +121,73 @@ class _RecipeHistoryScreenState extends State<RecipeHistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final appBarInset = glassAppBarInset(context);
-    return GlassScaffold(
-      appBar: glassAppBar(context, title: const Text('History')),
-      body: FutureBuilder<List<_Version>>(
-        future: _versions,
-        builder: (context, snapshot) {
-          // Blank rather than a spinner while the read lands: an indefinite
-          // animation never lets pumpAndSettle return.
-          if (!snapshot.hasData) return const SizedBox.shrink();
-          final versions = snapshot.data!;
-          return ListView.builder(
-            padding: EdgeInsets.only(top: appBarInset + 8, bottom: 32),
-            itemCount: versions.length,
-            itemBuilder: (context, index) => _VersionCard(
-              version: versions[index],
-              // Counted from the original so the numbering doesn't shift as
-              // more versions are added on top.
-              number: versions.length - index,
-              isCurrent: index == 0,
-              isOriginal: index == versions.length - 1,
-              onRestore: () => _restore(versions[index]),
-              onUndo: () => _undo(versions, index),
-            ),
-          );
-        },
+    return FutureBuilder<List<_Version>>(
+      future: _versions,
+      builder: (context, snapshot) {
+        // Blank under the title rather than a spinner while the read lands:
+        // an indefinite animation never lets pumpAndSettle return.
+        final versions = snapshot.data ?? const <_Version>[];
+        final title = versions.isEmpty ? null : versions.first.saved.$2.title;
+        return SpreadPage(
+          title: 'History',
+          subtitle: title == null
+              ? null
+              : '$title · ${versions.length} '
+                    '${versions.length == 1 ? 'version' : 'versions'}. Each '
+                    'keeps its own cook log, so you can see which one worked.',
+          children: [
+            for (final (index, version) in versions.indexed)
+              _VersionCard(
+                version: version,
+                // Counted from the original so the numbering doesn't shift as
+                // more versions are added on top.
+                number: versions.length - index,
+                isCurrent: index == 0,
+                isOriginal: index == versions.length - 1,
+                onRestore: () => _restore(version),
+                onUndo: () => _undo(versions, index),
+              ),
+            if (versions.length > 1) const _TwoWaysBack(),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// What the two buttons on a card do, said once at the foot of the page
+/// rather than on every card.
+class _TwoWaysBack extends StatelessWidget {
+  const _TwoWaysBack();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final style = theme.textTheme.bodyMedium;
+    final bold = weighted(style, FontWeight.w600);
+    return GlassPanel(
+      margin: const EdgeInsets.only(top: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Text.rich(
+          TextSpan(
+            style: style,
+            children: [
+              TextSpan(text: 'Restore this version', style: bold),
+              const TextSpan(
+                text:
+                    ' brings back that whole recipe, undoing everything '
+                    'after it.\n',
+              ),
+              TextSpan(text: 'Undo these changes', style: bold),
+              const TextSpan(
+                text:
+                    ' reverses only what that version changed, and keeps '
+                    'later edits.',
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -171,88 +213,174 @@ class _VersionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final accent = tagAccent(context, version.saved.$2.tags);
+    final scheme = theme.colorScheme;
+    final accent = scheme.primary;
     final entries = version.entries;
+    final muted = theme.textTheme.bodySmall?.copyWith(
+      color: scheme.onSurfaceVariant,
+    );
+    // The current version is drawn open on the page, ringed in the accent;
+    // the ones behind it sit on the wash.
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(20),
+      side: isCurrent
+          ? BorderSide(color: accent, width: 1.5)
+          : BorderSide(color: glassRim(context)),
+    );
 
-    return GlassPanel(
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    isOriginal ? 'Original' : 'Version $number',
-                    style: theme.textTheme.titleMedium,
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      decoration: ShapeDecoration(
+        shape: shape,
+        color: isCurrent ? scheme.surface : scheme.surfaceContainerLow,
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Expanded(
+                child: Text(
+                  isOriginal ? 'Original' : 'Version $number',
+                  style: serif(28),
+                ),
+              ),
+              if (isCurrent)
+                DecoratedBox(
+                  decoration: ShapeDecoration(
+                    shape: const StadiumBorder(),
+                    color: herbWash(context),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 3,
+                    ),
+                    child: Text(
+                      'Current',
+                      style: weighted(
+                        theme.textTheme.labelMedium,
+                        FontWeight.w600,
+                      )?.copyWith(color: accent),
+                    ),
                   ),
                 ),
-                if (isCurrent)
-                  Chip(
-                    label: const Text('Current'),
-                    visualDensity: VisualDensity.compact,
-                    backgroundColor: accent.withValues(alpha: 0.22),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(_formatDate(version.saved.$2.createdAt), style: muted),
+          // A fork's diff is against the other phone's edit, not the version
+          // this one was made from — so say so.
+          if (version.forked) ...[
+            const SizedBox(height: 8),
+            DecoratedBox(
+              decoration: ShapeDecoration(
+                shape: StadiumBorder(
+                  side: BorderSide(color: glassRim(context)),
+                ),
+                color: scheme.surface,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(8, 4, 12, 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.smartphone, size: 14, color: scheme.onSurface),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Edited on another device',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          if (isOriginal)
+            Text(
+              'Imported from ${version.saved.$2.source}',
+              style: theme.textTheme.bodyMedium,
+            )
+          else if (version.changes.isEmpty)
+            Text('Saved with no changes', style: theme.textTheme.bodyMedium)
+          else
+            for (final change in version.changes) _ChangeRow(change: change),
+          const SizedBox(height: 4),
+          // The whole log, not the detail screen's latest two: this is where
+          // versions get compared.
+          if (entries.isEmpty)
+            Text('Never made', style: muted)
+          else
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: glassFill(context),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(4, 2, 4, 10),
+                      child: Row(
+                        children: [
+                          if (headlineStars(entries) case final stars
+                              when stars > 0)
+                            StarsRow(stars: stars, accent: accent, size: 18),
+                          const Spacer(),
+                          Text(
+                            entries.length == 1
+                                ? 'Made once'
+                                : 'Made ${entries.length}×',
+                            style: muted,
+                          ),
+                        ],
+                      ),
+                    ),
+                    for (final (i, entry) in entries.indexed) ...[
+                      if (i > 0) const SizedBox(height: 6),
+                      CookEntryLine(entry: entry, accent: accent),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          // Two ways back, because the card shows a *change* and a version is
+          // a whole recipe: Undo takes out what's listed above and keeps every
+          // later edit; Restore brings back this version entire, undoing
+          // everything since. A Wrap, so a narrow phone stacks them.
+          if (!isOriginal && version.changes.isNotEmpty || !isCurrent) ...[
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (!isCurrent)
+                  FilledButton.icon(
+                    onPressed: onRestore,
+                    icon: const Icon(Icons.restore, size: 18),
+                    label: const Text('Restore this version'),
+                  ),
+                if (!isOriginal && version.changes.isNotEmpty)
+                  OutlinedButton.icon(
+                    onPressed: onUndo,
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: glassRim(context)),
+                      foregroundColor: scheme.onSurface,
+                      backgroundColor: scheme.surface,
+                    ),
+                    icon: const Icon(Icons.undo, size: 18),
+                    label: const Text('Undo these changes'),
                   ),
               ],
             ),
-            const SizedBox(height: 2),
-            Text(
-              // A fork's diff is against the other phone's edit, not the
-              // version this one was made from — so say so.
-              version.forked
-                  ? '${_formatDate(version.saved.$2.createdAt)} · '
-                        'Edited on another device'
-                  : _formatDate(version.saved.$2.createdAt),
-              style: theme.textTheme.bodySmall,
-            ),
-            if (entries.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              if (headlineStars(entries) case final stars when stars > 0)
-                StarsRow(stars: stars, accent: accent, size: 18),
-              // The whole log, not the detail screen's latest two: this is
-              // where versions get compared.
-              for (final entry in entries)
-                CookEntryLine(entry: entry, accent: accent),
-            ],
-            const SizedBox(height: 12),
-            if (isOriginal)
-              Text(
-                'Imported from ${version.saved.$2.source}',
-                style: theme.textTheme.bodyMedium,
-              )
-            else if (version.changes.isEmpty)
-              Text('Saved with no changes', style: theme.textTheme.bodyMedium)
-            else
-              for (final change in version.changes) _ChangeRow(change: change),
-            // Two ways back, because the card shows a *change* and a version
-            // is a whole recipe: Undo takes out what's listed above and keeps
-            // every later edit; Restore brings back this version entire,
-            // undoing everything since. A Wrap, so a narrow phone stacks them.
-            if (!isOriginal && version.changes.isNotEmpty || !isCurrent) ...[
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  if (!isOriginal && version.changes.isNotEmpty)
-                    OutlinedButton.icon(
-                      onPressed: onUndo,
-                      icon: const Icon(Icons.undo, size: 18),
-                      label: const Text('Undo these changes'),
-                    ),
-                  if (!isCurrent)
-                    OutlinedButton.icon(
-                      onPressed: onRestore,
-                      icon: const Icon(Icons.restore, size: 18),
-                      label: const Text('Restore this version'),
-                    ),
-                ],
-              ),
-            ],
           ],
-        ),
+        ],
       ),
     );
   }
@@ -319,14 +447,17 @@ TextStyle? _lineStyle(
   BuildContext context,
   Color color, {
   required bool bold,
-}) => Theme.of(context).textTheme.bodyMedium?.copyWith(
-  color: color,
-  height: 1.4,
-  fontWeight: bold ? FontWeight.w600 : null,
-  // The two halves are read against each other, so digits line up column for
-  // column: 60 against 120 rather than two sentences.
-  fontFeatures: const [FontFeature.tabularFigures()],
-);
+}) =>
+    weighted(
+      Theme.of(context).textTheme.bodyMedium,
+      bold ? FontWeight.w600 : FontWeight.w400,
+    )?.copyWith(
+      color: color,
+      height: 1.4,
+      // The two halves are read against each other, so digits line up column for
+      // column: 60 against 120 rather than two sentences.
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
 
 /// What a value was, and what it became. Reads across on one line when both
 /// halves are short, and stacks when they are not — a paragraph of step
@@ -361,10 +492,7 @@ class _Swap extends StatelessWidget {
         TextSpan(
           children: [
             TextSpan(text: before, style: was),
-            TextSpan(
-              text: '  \u2192  ',
-              style: now?.copyWith(fontWeight: FontWeight.w700),
-            ),
+            TextSpan(text: '  \u2192  ', style: weighted(now, FontWeight.w700)),
             TextSpan(text: after, style: now),
           ],
         ),
@@ -422,11 +550,10 @@ class _Badge extends StatelessWidget {
           Flexible(
             child: Text(
               text,
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: color,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.3,
-              ),
+              style: weighted(
+                theme.textTheme.labelSmall,
+                FontWeight.w600,
+              )?.copyWith(color: color, letterSpacing: 0.3),
             ),
           ),
         ],
@@ -464,11 +591,10 @@ class _BandedLine extends StatelessWidget {
             child: Text(
               marker,
               textAlign: TextAlign.center,
-              style: _lineStyle(
-                context,
-                color,
-                bold: true,
-              )?.copyWith(fontWeight: FontWeight.w700),
+              style: weighted(
+                _lineStyle(context, color, bold: true),
+                FontWeight.w700,
+              ),
             ),
           ),
           Expanded(child: child),

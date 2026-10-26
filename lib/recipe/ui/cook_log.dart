@@ -49,52 +49,102 @@ class StarsRow extends StatelessWidget {
   );
 }
 
-/// One cook: when, for how many, how it went, and the note. Tappable when
-/// [onTap] is given — the detail screen edits through it, history only reads.
+/// One cook as a card: the day set large on the left, then how it went, for
+/// how many, and the note. Tappable when [onTap] is given — the detail screen
+/// edits through it, history only reads.
 class CookEntryLine extends StatelessWidget {
   final CookEntry entry;
-  final Color accent;
+
+  /// The stars' colour; the theme's accent when not given.
+  final Color? accent;
   final VoidCallback? onTap;
 
-  const CookEntryLine({
-    super.key,
-    required this.entry,
-    required this.accent,
-    this.onTap,
-  });
+  const CookEntryLine({super.key, required this.entry, this.accent, this.onTap});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final muted = theme.textTheme.bodySmall?.copyWith(
+      color: scheme.onSurfaceVariant,
+    );
+    final local = entry.date.toLocal();
     final servings = entry.servings;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    servings == null
-                        ? formatDay(entry.date)
-                        : '${formatDay(entry.date)} · for $servings',
-                    style: theme.textTheme.bodySmall,
+    return Material(
+      color: scheme.surface,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // The whole date for a screen reader; the two big parts for the
+              // eye.
+              Semantics(
+                label: formatDay(entry.date),
+                excludeSemantics: true,
+                child: SizedBox(
+                  width: 44,
+                  child: Column(
+                    children: [
+                      Text(
+                        '${local.day}',
+                        style: const TextStyle(
+                          fontFamily: 'InstrumentSerif',
+                          fontSize: 32,
+                          height: 1,
+                        ),
+                      ),
+                      Text(
+                        formatDay(entry.date).split(' ')[1].toUpperCase(),
+                        style: muted?.copyWith(letterSpacing: 0.6),
+                      ),
+                    ],
                   ),
                 ),
-                if (entry.stars > 0)
-                  StarsRow(stars: entry.stars, accent: accent, size: 16),
-              ],
-            ),
-            if (entry.note.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Text(entry.note, style: theme.textTheme.bodyMedium),
               ),
-          ],
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        if (entry.stars > 0)
+                          StarsRow(
+                            stars: entry.stars,
+                            accent: accent ?? scheme.primary,
+                            size: 16,
+                          )
+                        else
+                          Text('No stars', style: muted),
+                        const Spacer(),
+                        if (servings != null)
+                          Text('Served $servings', style: muted),
+                      ],
+                    ),
+                    if (entry.note.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          entry.note,
+                          style: TextStyle(
+                            fontFamily: 'InstrumentSerif',
+                            fontStyle: FontStyle.italic,
+                            fontSize: 18,
+                            height: 1.3,
+                            color: scheme.onSurface.withValues(alpha: 0.86),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

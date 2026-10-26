@@ -231,8 +231,8 @@ which url wins.
 
 **A recipe whose photos all fail is a recipe with no photo.** The hero eases
 shut and the screen becomes the plain one, rather than sitting open on generated
-art in a picture's place. That art is still the *list thumbnail* fallback, where
-a 64px tile has nothing to collapse into — it shows through while the chain is
+art in a picture's place. That art is still the *list tile* fallback, where
+a tile has nothing to collapse into — it shows through while the chain is
 looking and stays put when it comes back with nothing. The list runs the full
 chain too, in `_Cover`, query included, so a row shows the same photo the hero
 settles on. Both memos are shared across rows and with the detail screen, so a
@@ -345,6 +345,19 @@ referenced photo the account lacks and downloads each one the phone lacks, so a 
 download is retried by the next run. Storage objects don't cascade from `auth.users`, so
 `DELETE /me` empties the folder before it deletes the user.
 
+**A step timer is an end time, not a countdown.** `timers` in
+[lib/recipe/recipe_timers.dart](lib/recipe/recipe_timers.dart) is a global
+`ValueNotifier` of `<versionId>/<stepId>` → when it ends, and the step's button reads
+the time left off the wall clock each second. A phone locks and the app is
+suspended mid-proof; a countdown kept in memory would come back wrong. Starting one
+also schedules a local notification for its end, because two hours later the app is
+not what's open. The plugin exists only on Android and iOS, so the desktop harness and
+`flutter test` count down on screen and notify nobody — the empty-`PHOTO_PROXY` rule.
+Permission is asked on the first timer, not at launch. Android 14 denies exact alarms
+to new installs by default, so it schedules exact when allowed and inexact (can land
+minutes late) when not. Timers are in memory only: if the process dies the
+notification still fires but the step shows Start again.
+
 **No state management package and none wanted** — three screens over one store, plain
 `StatefulWidget` + `setState`, `Navigator.push` between them. The store and parser are
 constructed once in `main()` and passed down by constructor.
@@ -403,13 +416,13 @@ constructed once in `main()` and passed down by constructor.
   spinner in a modal is an indefinite animation, and `pumpAndSettle` never returns.
 - The detail screen is a `CustomScrollView`, not a `ListView`, and passes
   `appBar: null` — a `SliverAppBar` is not a `PreferredSizeWidget`, so it cannot
-  go in `GlassScaffold.appBar`. Its frost is driven off `SliverLayoutBuilder`
+  go in `GlassScaffold.appBar`. The page closing over the photo is driven off `SliverLayoutBuilder`
   constraints rather than a `ScrollController`, so it stays a function of layout
   with nothing for `pumpAndSettle` to wait on. A recipe with no photo gets
   `expandedHeight: null` and looks exactly like every other screen.
 - Anything put inside the detail screen's `flexibleSpace` sits **under**
-  `frostPane`'s `BackdropFilter` and gets blurred away as the hero collapses.
-  That is why the recipe's name is set in the page body — centred, wrapping,
+  `barPane`, which fades in over it as the hero collapses.
+  That is why the recipe's name is set in the page body — wrapping,
   `headlineMedium` — rather than in the bar, which could only ever give it
   `kToolbarHeight`. A widget test asserting `findsWidgets` on it passes while it
   is invisible; assert it is *not* a descendant of `FlexibleSpaceBar` instead.
@@ -420,9 +433,25 @@ constructed once in `main()` and passed down by constructor.
 - A `SliverAppBar`'s height cannot be animated with `TweenAnimationBuilder` —
   that is a box widget and the target is a sliver. The detail screen uses an
   `AnimationController` with an `AnimatedBuilder` around the whole
-  `CustomScrollView` instead. Its frost divides by `expanded - collapsed`, which
+  `CustomScrollView` instead. Its pane opacity divides by `expanded - collapsed`, which
   reaches zero at the end of that animation; unguarded it puts a NaN straight
   into the opacity.
+- The look is "Spread" ([lib/recipe/ui/glass.dart](lib/recipe/ui/glass.dart) kept its
+  old name and `glass*` helpers, which paint flat now). Every screen but the recipe
+  view and the editor is a `SpreadPage`: no app bar, a round back button, the
+  title set large. Its `bottom` pins the page's one action above the keyboard.
+  Geist is one variable file, and a variable font ignores `FontWeight` unless the
+  `wght` axis matches — change a weight through `weighted()`, not a bare `copyWith`.
+  Geist has no `★` glyph either; draw a star with `Icons.star` in a `WidgetSpan`.
+- A running step timer repaints every second, so a test that starts one must `pump`,
+  never `pumpAndSettle`, and must cancel it before it ends. `widget_test.dart`'s
+  `tearDown` clears `timers`, which is a global and outlives a test.
+- The notification icon is named by string (`ic_launcher_monochrome`), which
+  resource shrinking can't see; `android/app/src/main/res/raw/keep.xml` is what
+  keeps a release build from stripping it. The plugin also needs core library
+  desugaring in `build.gradle.kts` and its two receivers in the manifest.
+- `flutter_test` sets `debugDisableShadows`, so a rendered screenshot shows every
+  elevated widget (the FAB, the action pills) with a black outline. It isn't real.
 - `SharePlus.instance.share` needs a `sharePositionOrigin` rect or it throws on iPad, where
   the sheet is a popover that must be anchored. On Linux it degrades to a `mailto:` link —
   expect that when testing the share button on desktop, it isn't a bug.
