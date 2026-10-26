@@ -382,8 +382,13 @@ constructed once in `main()` and passed down by constructor.
 - `image_picker` has no Linux implementation, so "Choose photo" throws
   `MissingPluginException` on the desktop harness and answers with a SnackBar.
   Expect that, the same way the share button degrades to `mailto:` there.
-- Sign in with Apple is written but has **never run** — it needs Xcode's "Sign in
-  with Apple" capability and a Mac. Android shows Google only, on purpose. Google
+- Sign in with Apple needs the Apple provider enabled in Supabase with
+  `dev.bengid.mise` under Client IDs; the OAuth secret key stays empty, because
+  native sign-in never uses it. An Apple ID whose email a Google user already has
+  fails to link with `email_exists`, which `linkOrSwitch` treats like
+  `identity_already_exists`. On iOS, `env.json` needs `GOOGLE_IOS_CLIENT_ID` or the
+  Google button answers with a SnackBar. A debug build launched from its `.app`
+  hangs on the splash screen; use `flutter run`. Android shows Google only, on purpose. Google
   sign-in on Android needs the signing key's SHA-1 on the Android OAuth client; the
   debug keystore here lives at `~/.config/.android/debug.keystore`, not `~/.android`.
 - A `Future` made in the fake-async zone never delivers inside `tester.runAsync`.

@@ -76,6 +76,11 @@ Future<void> _ensureUser() async {
 /// Google account was linked on the first phone, so linking fails with
 /// `identity_already_exists`. Signing in with the same token moves this phone
 /// onto that user. The abandoned anonymous user costs nothing to leave behind.
+///
+/// `email_exists` is the same case through another provider: Apple on an
+/// iPhone, carrying the email of a user Google made. The identity is new but
+/// the address is taken, and signing in lets Supabase link Apple to that user
+/// by its verified email.
 @visibleForTesting
 Future<void> linkOrSwitch({
   required Future<void> Function() link,
@@ -84,7 +89,10 @@ Future<void> linkOrSwitch({
   try {
     await link();
   } on AuthException catch (e) {
-    if (e.code != ErrorCode.identityAlreadyExists.code) rethrow;
+    if (e.code != ErrorCode.identityAlreadyExists.code &&
+        e.code != ErrorCode.emailExists.code) {
+      rethrow;
+    }
     await signIn();
   }
 }
@@ -119,6 +127,11 @@ final Future<void> _googleReady = GoogleSignIn.instance.initialize(
 /// Throws on cancel and on failure alike; Settings answers both with a
 /// SnackBar.
 Future<void> signInWithGoogle() async {
+  // Without it the iOS plugin throws an NSException, which kills the app
+  // before Dart can catch anything.
+  if (Platform.isIOS && _googleIosClientId.isEmpty) {
+    throw const AuthException('Google sign-in is not set up for iOS');
+  }
   await _googleReady;
   final user = await GoogleSignIn.instance.authenticate();
   final idToken = user.authentication.idToken;
@@ -126,7 +139,7 @@ Future<void> signInWithGoogle() async {
   await _linkOrSignIn(OAuthProvider.google, idToken);
 }
 
-/// iOS only, and unverified until it runs on a Mac (see CLAUDE.md).
+/// iOS only.
 Future<void> signInWithApple() async {
   final rawNonce = _auth.generateRawNonce();
   final credential = await SignInWithApple.getAppleIDCredential(

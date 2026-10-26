@@ -48,7 +48,7 @@ Supabase, anonymous by default: every install gets a user id with no sign-up scr
 
 - [x] Anonymous sign-in at launch, tolerant of being offline
 - [x] Link Google in Settings, keeping the same user id (verified on Android)
-- [ ] Apple on iOS — written, not yet run (needs a Mac)
+- [x] Apple on iOS (verified on the simulator)
 - [x] A second phone signing in with the same account switches to it
 - [x] Sign out and Delete account, both keeping recipes on the phone
 - [x] `profiles` table: `pro_until`, `free_tries_used`, created by trigger, owner-read only
@@ -59,13 +59,13 @@ Supabase, anonymous by default: every install gets a user id with no sign-up scr
 
 Two-way, for signed-in users only, free. Local files stay the source of truth.
 
-- [ ] Tables for recipe versions (`parent_id`, `deleted_at`), cook entries and unit settings
-- [ ] `mise://` photos in Supabase Storage, one folder per user
-- [ ] Runs on launch, on resume and after every save; never blocks the screen
-- [ ] Deletes leave a `deleted_at` marker so they don't come back; Undo clears it
-- [ ] Two devices editing one version: the older edit moves into history, labelled
+- [x] Tables for recipe versions (`parent_id`, `deleted_at`), cook entries and unit settings
+- [x] `mise://` photos in Supabase Storage, one folder per user
+- [x] Runs on launch, on resume and after every save; never blocks the screen
+- [x] Deletes leave a `deleted_at` marker so they don't come back; Undo clears it
+- [x] Two devices editing one version: the older edit moves into history, labelled
       "edited on another device"
-- [ ] First link uploads the whole library
+- [x] First link uploads the whole library
 
 ### Phase 4 — Recipes from the server
 

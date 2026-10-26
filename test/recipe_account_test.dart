@@ -31,6 +31,23 @@ void main() {
     expect(calls, ['link', 'signIn']);
   });
 
+  test('a new provider carrying a known email is switched to', () async {
+    final calls = <String>[];
+
+    await linkOrSwitch(
+      link: () async {
+        calls.add('link');
+        throw const AuthException(
+          'A user with this email address has already been registered',
+          code: 'email_exists',
+        );
+      },
+      signIn: () async => calls.add('signIn'),
+    );
+
+    expect(calls, ['link', 'signIn']);
+  });
+
   test('any other failure is not papered over with a sign-in', () async {
     final calls = <String>[];
 
