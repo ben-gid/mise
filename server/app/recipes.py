@@ -70,6 +70,11 @@ def _model_schema() -> dict:
     schema.pop("$id", None)
     schema["$defs"] = schema.pop("definitions")
     schema["properties"].pop("image_urls")
+    # Optional to the validator, so recipes saved before them still load, but
+    # never to the model: under constrained decoding an optional field is one
+    # it may skip, and a written recipe came back with neither — no headnote,
+    # nothing for the photo search. Both can still be null.
+    schema["required"] = [*schema["required"], "notes", "image_query"]
 
     def any_of(node: Any) -> Any:
         if isinstance(node, list):
@@ -139,6 +144,12 @@ async def read_page(url: str) -> str:
                 if response.is_redirect:
                     url = urljoin(url, response.headers["location"])
                     continue
+                if response.status_code in (401, 403, 429):
+                    # Bot protection, mostly: the site serves people, not apps.
+                    raise PageError(
+                        "That site doesn't let apps read its pages. Copy the "
+                        "recipe's text and paste it into the box instead."
+                    )
                 if response.is_error:
                     raise PageError(f"The page answered {response.status_code}")
                 body = b""

@@ -74,7 +74,7 @@ Future<String> askForRecipe({
         }
       case HttpStatus.paymentRequired:
         throw const ServerRecipeException(
-          'That was the last free recipe. Pro is coming soon.',
+          'You\'ve used all your free recipes. Pro is coming soon.',
         );
       case HttpStatus.tooManyRequests:
         throw const ServerRecipeException(

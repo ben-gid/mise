@@ -156,12 +156,14 @@ def test_a_photo_goes_to_the_model_as_an_image(claude, db):
 def web(monkeypatch):
     """Stands in for the open web: `pages` by url; every host is public unless
     named in `private`."""
-    fake = SimpleNamespace(pages={}, private=set())
+    fake = SimpleNamespace(pages={}, private=set(), status=None)
 
     async def public(host):
         return host not in fake.private
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if fake.status:
+            return httpx.Response(fake.status)
         page = fake.pages.get(str(request.url))
         if isinstance(page, tuple):
             return httpx.Response(301, headers={"location": page[1]})
@@ -209,4 +211,20 @@ def test_only_public_https_pages_are_read(claude, db, url):
     # The real address check, unmocked: a literal link-local IP is never global.
     response = post({"url": url})
     assert response.status_code == 422
+    assert claude.calls == []
+
+
+def test_the_model_must_write_a_headnote_and_a_photo_query():
+    # Optional fields get skipped under constrained decoding; a real recipe
+    # written from a sentence came back with neither.
+    required = recipes._format["schema"]["required"]
+    assert "notes" in required and "image_query" in required
+    assert "image_urls" not in recipes._format["schema"]["properties"]
+
+
+def test_a_site_that_blocks_apps_says_what_to_do(claude, db, web):
+    web.status = 403
+    response = post({"url": "https://blocked.site/r"})
+    assert response.status_code == 422
+    assert "paste" in response.json()["errors"][0]
     assert claude.calls == []
