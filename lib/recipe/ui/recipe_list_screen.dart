@@ -132,10 +132,23 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
           : SystemUiOverlayStyle.dark,
       child: Scaffold(
         floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
-        floatingActionButton: FloatingActionButton.extended(
-          onPressed: _openImport,
-          icon: const Icon(Icons.add),
-          label: const Text('Import recipe'),
+        // Tinted glass, the way iOS draws a primary action floating over
+        // content: the grid scrolls under it and shows through the herb.
+        floatingActionButton: frost(
+          context: context,
+          shape: const StadiumBorder(),
+          tint: theme.colorScheme.primary.withValues(alpha: 0.86),
+          lift: true,
+          child: FloatingActionButton.extended(
+            onPressed: _openImport,
+            backgroundColor: Colors.transparent,
+            elevation: 0,
+            focusElevation: 0,
+            hoverElevation: 0,
+            highlightElevation: 0,
+            icon: const Icon(Icons.add),
+            label: const Text('Import recipe'),
+          ),
         ),
         body: FutureBuilder<_Library>(
           future: _library,

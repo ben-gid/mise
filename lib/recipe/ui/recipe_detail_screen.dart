@@ -252,7 +252,20 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
     final picked = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => _PhotoSheet(photos: photos, store: widget.store),
+      // The sheet's own Material stays clear so frost is the only surface;
+      // its drag handle would sit on nothing, so the sheet draws its own.
+      backgroundColor: Colors.transparent,
+      showDragHandle: false,
+      builder: (context) => frost(
+        context: context,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        tint: Theme.of(
+          context,
+        ).colorScheme.surface.withValues(alpha: frostAlpha),
+        child: _PhotoSheet(photos: photos, store: widget.store),
+      ),
     );
     if (picked == null || !mounted) return;
     // The device photo stays the editor's job: it writes a file and needs the
@@ -353,7 +366,6 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
       ),
     );
   }
-
 
   /// Ingredients ticked off as they come out of the cupboard. Per visit, like
   /// [_flipped]: a checklist for tonight, not a fact about the recipe.
@@ -616,7 +628,10 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
               : SystemUiOverlayStyle.dark,
           leading: back(overPhoto: open),
           leadingWidth: 64,
-          actions: [bar(overPhoto: open), const SizedBox(width: 12)],
+          actions: [
+            bar(overPhoto: open),
+            const SizedBox(width: 12),
+          ],
           flexibleSpace: Stack(
             fit: StackFit.expand,
             children: [
@@ -638,7 +653,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
   }
 }
 
-/// White over a photo, the page's wash once the page has covered it.
+/// Glass over a photo, the page's wash once the page has covered it.
 class _Pill extends StatelessWidget {
   /// 1 sitting on the photo, 0 on the plain bar; anything between while the
   /// hero closes.
@@ -650,18 +665,15 @@ class _Pill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return DecoratedBox(
-      decoration: ShapeDecoration(
-        shape: const StadiumBorder(),
-        color: Color.lerp(glassFill(context), scheme.surface, overPhoto),
-        shadows: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.14 * overPhoto),
-            blurRadius: 14,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
+    return frost(
+      context: context,
+      shape: const StadiumBorder(),
+      tint: Color.lerp(
+        glassFill(context),
+        scheme.surface.withValues(alpha: frostAlpha),
+        overPhoto,
+      )!,
+      lift: overPhoto > 0,
       child: Row(mainAxisSize: MainAxisSize.min, children: children),
     );
   }
@@ -738,8 +750,10 @@ class _TagLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final style = weighted(theme.textTheme.labelMedium, FontWeight.w600)
-        ?.copyWith(color: theme.colorScheme.primary, letterSpacing: 1.1);
+    final style = weighted(
+      theme.textTheme.labelMedium,
+      FontWeight.w600,
+    )?.copyWith(color: theme.colorScheme.primary, letterSpacing: 1.1);
     return Wrap(
       runSpacing: 4,
       children: [
@@ -777,9 +791,11 @@ class _HeadnoteState extends State<_Headnote> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final style = serif(21, height: 1.32, italic: true).copyWith(
-      color: theme.colorScheme.onSurface.withValues(alpha: 0.86),
-    );
+    final style = serif(
+      21,
+      height: 1.32,
+      italic: true,
+    ).copyWith(color: theme.colorScheme.onSurface.withValues(alpha: 0.86));
     return LayoutBuilder(
       builder: (context, constraints) {
         final painter = TextPainter(
@@ -864,15 +880,14 @@ class _Facts extends StatelessWidget {
     );
 
     return DecoratedBox(
-      decoration: BoxDecoration(border: Border(top: rule, bottom: rule)),
+      decoration: BoxDecoration(
+        border: Border(top: rule, bottom: rule),
+      ),
       // IntrinsicHeight so the dividers run the strip's full height.
       child: IntrinsicHeight(
         child: Row(
           children: [
-            cell(
-              'Serves',
-              _Stepper(value: servings, onChanged: onServings),
-            ),
+            cell('Serves', _Stepper(value: servings, onChanged: onServings)),
             if (timed > 0) ...[
               divider(),
               Expanded(
@@ -891,9 +906,7 @@ class _Facts extends StatelessWidget {
             divider(),
             Expanded(
               child: cell(
-                entries.isEmpty
-                    ? 'Not made yet'
-                    : 'Made ${entries.length}×',
+                entries.isEmpty ? 'Not made yet' : 'Made ${entries.length}×',
                 Row(
                   children: [
                     if (stars > 0) ...[
@@ -985,9 +998,9 @@ class _IngredientRow extends StatelessWidget {
     final decoration = ready ? TextDecoration.lineThrough : null;
     // The amount column grows with the reader's text size, but never takes
     // more than a third of the row from the name.
-    final amountWidth = MediaQuery.textScalerOf(context)
-        .scale(104)
-        .clamp(0.0, MediaQuery.sizeOf(context).width / 3);
+    final amountWidth = MediaQuery.textScalerOf(
+      context,
+    ).scale(104).clamp(0.0, MediaQuery.sizeOf(context).width / 3);
     return DecoratedBox(
       decoration: BoxDecoration(
         border: Border(bottom: BorderSide(color: glassRim(context))),
@@ -1110,11 +1123,8 @@ class _Amount extends StatelessWidget {
       child: Text(
         label,
         key: ValueKey(label),
-        style:
-            weighted(
-              Theme.of(context).textTheme.bodyLarge,
-              FontWeight.w600,
-            )?.copyWith(
+        style: weighted(Theme.of(context).textTheme.bodyLarge, FontWeight.w600)
+            ?.copyWith(
               color: color,
               decoration: decoration,
               // Numerals go monospaced, so an amount reads as a measured
@@ -1364,9 +1374,7 @@ class _CookLogState extends State<_CookLog> {
                       entries.length == 1
                           ? 'Made once'
                           : 'Made ${entries.length} times',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: muted,
-                      ),
+                      style: theme.textTheme.bodyMedium?.copyWith(color: muted),
                     ),
                 ],
               ),
@@ -1380,9 +1388,8 @@ class _CookLogState extends State<_CookLog> {
                 style: theme.textTheme.bodySmall?.copyWith(color: muted),
               ),
               const SizedBox(height: 12),
-              for (final entry in _showAll
-                  ? entries
-                  : entries.take(_collapsed)) ...[
+              for (final entry
+                  in _showAll ? entries : entries.take(_collapsed)) ...[
                 CookEntryLine(entry: entry, onTap: () => widget.onEdit(entry)),
                 const SizedBox(height: 8),
               ],
@@ -1532,9 +1539,11 @@ class _EntryDialogState extends State<_EntryDialog> {
               Text(
                 _verdicts[_stars],
                 textAlign: TextAlign.center,
-                style: serif(20, height: 1.3, italic: true).copyWith(
-                  color: _stars > 0 ? widget.accent : muted,
-                ),
+                style: serif(
+                  20,
+                  height: 1.3,
+                  italic: true,
+                ).copyWith(color: _stars > 0 ? widget.accent : muted),
               ),
               const SizedBox(height: 16),
               Row(
@@ -1642,6 +1651,19 @@ class _PhotoSheet extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Center(
+              child: Container(
+                width: 32,
+                height: 4,
+                margin: const EdgeInsets.symmetric(vertical: 14),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.onSurfaceVariant.withValues(
+                    alpha: 0.4,
+                  ),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
             Text('Choose a photo', style: theme.textTheme.headlineSmall),
             const SizedBox(height: 12),
             if (photos.isEmpty)

@@ -1,3 +1,5 @@
+import 'dart:ui' show ImageFilter;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -9,7 +11,8 @@ import 'package:flutter/services.dart';
 /// decorating, so every other surface stays flat and quiet.
 ///
 /// The file keeps its old name and the `glass*` helpers keep theirs so the
-/// screens not yet redrawn compile unchanged; they now paint flat.
+/// screens not yet redrawn compile unchanged; they now paint flat. Real glass
+/// is [frost], and only for controls floating over the page.
 ///
 /// One rule carries over and is easy to break by accident: **nothing animates
 /// on its own.** An indefinite animation hangs `pumpAndSettle` in widget tests
@@ -132,7 +135,7 @@ LinearGradient coverGradient(Color accent) => LinearGradient(
 );
 
 /// The wash over a hero photo. Only at the very bottom, under the credit line:
-/// the buttons at the top sit on solid white pills and need nothing from the
+/// the buttons at the top sit on frosted pills and need nothing from the
 /// picture, which is the thing being looked at.
 const heroScrim = LinearGradient(
   begin: Alignment.bottomCenter,
@@ -184,21 +187,80 @@ class GlassScaffold extends StatelessWidget {
 double glassAppBarInset(BuildContext context) =>
     MediaQuery.paddingOf(context).top + kToolbarHeight;
 
-/// The bar's own surface: the page colour with a hairline under it.
+/// Frosted glass, for the controls that float over the page and nothing else:
+/// the bars content scrolls under, the buttons over the hero photo, the import
+/// button, the photo sheet. That is where iOS puts Liquid Glass. The page, its
+/// cards and its lists stay flat, as Spread drew them, because glass on content
+/// is the thing Apple's guidance rules out.
 ///
-/// [opacity] ramps it in, so the detail screen's photo can scroll up and be
-/// covered by plain page as the hero collapses. Deliberately not an animation:
-/// the hero drives this straight off its own layout extent.
-Widget barPane(BuildContext context, {double opacity = 1}) {
-  final scheme = Theme.of(context).colorScheme;
+/// The same on Android and iOS: a blur of what is behind, [tint] over it, a
+/// light rim on the edge. [tint] needs some transparency or there is nothing
+/// to see through it. [lift] is a soft shadow, for a control floating free
+/// rather than one docked to an edge.
+Widget frost({
+  required BuildContext context,
+  required ShapeBorder shape,
+  required Color tint,
+  required Widget child,
+  bool lift = false,
+}) {
+  final rim = Colors.white.withValues(alpha: _isDark(context) ? 0.12 : 0.5);
   return DecoratedBox(
-    decoration: BoxDecoration(
-      color: scheme.surface.withValues(alpha: opacity),
-      border: Border(
-        bottom: BorderSide(color: glassRim(context).withValues(alpha: opacity)),
+    decoration: ShapeDecoration(
+      shape: shape,
+      shadows: [
+        if (lift)
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.16),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+      ],
+    ),
+    child: ClipPath(
+      clipper: ShapeBorderClipper(shape: shape),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: DecoratedBox(
+          position: DecorationPosition.foreground,
+          decoration: ShapeDecoration(
+            shape: shape is OutlinedBorder
+                ? shape.copyWith(side: BorderSide(color: rim))
+                : shape,
+          ),
+          child: ColoredBox(color: tint, child: child),
+        ),
       ),
     ),
-    child: const SizedBox.expand(),
+  );
+}
+
+/// How much of the page shows through a [frost] tint: enough that what
+/// scrolls under it reads as shapes and colour, not enough to read words.
+const frostAlpha = 0.72;
+
+/// The bar's own surface: frosted page colour with a hairline under it.
+///
+/// [opacity] ramps it in, so the detail screen's photo can scroll up and
+/// under it as the hero collapses. Deliberately not an animation: the hero
+/// drives this straight off its own layout extent.
+Widget barPane(BuildContext context, {double opacity = 1}) {
+  final scheme = Theme.of(context).colorScheme;
+  return ClipRect(
+    child: BackdropFilter(
+      filter: ImageFilter.blur(sigmaX: 20 * opacity, sigmaY: 20 * opacity),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: scheme.surface.withValues(alpha: frostAlpha * opacity),
+          border: Border(
+            bottom: BorderSide(
+              color: glassRim(context).withValues(alpha: opacity),
+            ),
+          ),
+        ),
+        child: const SizedBox.expand(),
+      ),
+    ),
   );
 }
 
