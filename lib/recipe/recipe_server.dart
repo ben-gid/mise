@@ -23,6 +23,13 @@ class ServerRecipeException implements Exception {
   String toString() => message;
 }
 
+/// The free tries are gone. Its own type so the screens that ask can offer
+/// Pro instead of only saying so.
+class OutOfTriesException extends ServerRecipeException {
+  const OutOfTriesException()
+    : super('You\'ve used your five free recipes.');
+}
+
 /// Asks the server to write a recipe, and returns it as raw JSON.
 ///
 /// Raw, because it is untrusted like any paste: the caller puts it through
@@ -73,12 +80,12 @@ Future<String> askForRecipe({
           throw RecipeValidationException(errors.cast<String>());
         }
       case HttpStatus.paymentRequired:
-        throw const ServerRecipeException(
-          'You\'ve used all your free recipes. Pro is coming soon.',
-        );
+        throw const OutOfTriesException();
       case HttpStatus.tooManyRequests:
-        throw const ServerRecipeException(
-          'That is a lot of recipes for one hour. Try again later.',
+        // The hourly limit or Pro's monthly one; the server words both.
+        final detail = (jsonDecode(body) as Map<String, dynamic>)['detail'];
+        throw ServerRecipeException(
+          detail is String ? detail : 'Too many recipes. Try again later.',
         );
       case HttpStatus.serviceUnavailable:
         throw const ServerRecipeException(

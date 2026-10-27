@@ -9,6 +9,7 @@ import '../recipe_parser.dart';
 import '../recipe_server.dart';
 import '../recipe_store.dart';
 import 'glass.dart';
+import 'pro_screen.dart' show writeOrUpgrade;
 
 /// Paste JSON from an LLM, validate it, save it. Validation errors are shown
 /// in full rather than as a single "invalid" — the whole point of the schema.
@@ -90,7 +91,9 @@ class _ImportRecipeScreenState extends State<ImportRecipeScreen> {
     setState(() => _askErrors = const []);
     final Recipe recipe;
     try {
-      recipe = widget.parser.parse(await whileWriting(context, message, ask));
+      recipe = widget.parser.parse(
+        await writeOrUpgrade(context, message, ask),
+      );
     } on RecipeValidationException catch (e) {
       if (mounted) setState(() => _askErrors = e.errors);
       return;

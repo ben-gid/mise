@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mise/recipe/recipe_account.dart';
+import 'package:mise/recipe/recipe_pro.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 void main() {
@@ -65,5 +66,7 @@ void main() {
     // Every test run, and the desktop harness: nothing to initialise, nothing
     // for Settings to show.
     expect(accountsOn, isFalse);
+    // And so no Pro: the paywall can't open where nothing could be bought.
+    expect(proOn, isFalse);
   });
 }

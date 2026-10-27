@@ -5,9 +5,12 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 
 import '../recipe_account.dart';
+import '../recipe_pro.dart';
 import '../recipe_store.dart';
 import '../recipe_units.dart';
+import 'cook_log.dart' show formatDay;
 import 'glass.dart';
+import 'pro_screen.dart';
 
 /// Settings. Appearance, then the display units, then the account when this
 /// build has one — another group goes in under these with its own label.
@@ -101,6 +104,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             color: theme.colorScheme.onSurfaceVariant,
           ),
         ),
+        if (proOn) ...[
+          const SizedBox(height: 28),
+          const SectionLabel('Mise Pro'),
+          const SizedBox(height: 12),
+          ValueListenableBuilder(
+            valueListenable: proUntil,
+            builder: (context, until, _) => _pro(until),
+          ),
+        ],
         // Last, not first: the app works the same signed in or not, and a
         // sign-in panel at the top of Settings reads as a gate.
         if (accountsOn) ...[
@@ -167,6 +179,47 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ),
     hint: setting.value == UnitSystem.metric ? metric : imperial,
   );
+
+  /// Status and one way in: the Pro screen holds the prices and Restore
+  /// either way, so there is one copy of each.
+  Widget _pro(DateTime? until) {
+    final theme = Theme.of(context);
+    return GlassPanel(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              until == null ? 'Free' : 'Pro until ${formatDay(until)}',
+              style: serif(26, height: 1.1),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              until == null
+                  ? 'Five recipes written for you, then Pro.'
+                  : 'Up to 200 recipes written for you a month.',
+              style: theme.textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 14),
+            OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+                side: BorderSide(color: glassRim(context)),
+                foregroundColor: theme.colorScheme.onSurface,
+                backgroundColor: theme.colorScheme.surface,
+              ),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const ProScreen()),
+              ),
+              child: Text(until == null ? 'See Pro' : 'Restore or manage'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _account(Account? current) {
     final theme = Theme.of(context);

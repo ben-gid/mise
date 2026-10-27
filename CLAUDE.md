@@ -392,6 +392,31 @@ blocking `whileWriting` dialog — an indefinite bar, which is fine only because
 tests never reach it. An adapted recipe saves through `saveVersion`, so the
 history diff says what the model changed and Undo these changes takes it back.
 
+**Pro is asked about, never told.** There is no RevenueCat webhook. When a user's
+free tries are gone and `pro_until` is empty or past, `usage.tries_left` asks
+RevenueCat's v1 `GET /subscribers/{uid}` once and, if the `pro` entitlement is
+active, writes its expiry into `pro_until`. Until that date no request asks again.
+A purchase, a Restore or a renewal is picked up by the next recipe request, and
+there is no event to miss, retry or order. The trade: a refund keeps working until
+the cached expiry, one period at most. RevenueCat failing is a 503 rather than a
+402, so a paying cook is never shown the paywall because of a hiccup. The phone
+calls `Purchases.logIn` with the Supabase user id every time `account` changes
+(`startPro` in [lib/recipe/recipe_pro.dart](lib/recipe/recipe_pro.dart)), which
+is what makes the server's question about the right customer. An anonymous
+user can buy. After a reinstall, Restore moves the receipt onto the new
+anonymous id, using RevenueCat's default transfer behaviour.
+
+Pro is capped at `PRO_MONTHLY` (200) successful recipes per UTC calendar month,
+counted from `usage`. At Haiku prices that is about a dollar, so the cap stops
+scripts, not cooks. Over the cap is a 429 whose `detail` the phone shows as it
+is. The hourly limit's 429 is worded for the cook as well, because only the
+server knows which limit it was. A 402 is `OutOfTriesException`, and
+`writeOrUpgrade` opens the paywall on it and asks again after a purchase, so the
+recipe being waited for still arrives. The phone's `proUntil` is for display
+only. No `REVENUECAT_SECRET_KEY` means nobody is Pro. No `REVENUECAT_*_KEY` in
+`env.json` (`proOn`) means no paywall and no Settings panel, which is the
+empty-`PHOTO_PROXY` rule again.
+
 **No state management package and none wanted** — three screens over one store, plain
 `StatefulWidget` + `setState`, `Navigator.push` between them. The store and parser are
 constructed once in `main()` and passed down by constructor.

@@ -125,15 +125,29 @@ async def recipe(body: RecipeRequest, request: Request, user: User):
             status_code=400,
             detail="Send text, a url, a photo, or a recipe with text",
         )
+    # Both 429s are worded for the cook: the phone shows the detail as it is,
+    # and only it knows which limit this was.
     if not _allow(_recipe_windows, _caller(request), RECIPE_LIMIT):
-        raise HTTPException(status_code=429, detail="Too many recipes")
+        raise HTTPException(
+            status_code=429,
+            detail="That is a lot of recipes for one hour. Try again later.",
+        )
     user_id = user["sub"]
     try:
         left = await usage.tries_left(user_id)
+        capped = left is None and (
+            await usage.made_this_month(user_id) >= usage.PRO_MONTHLY
+        )
     except (usage.UsageError, httpx.HTTPError):
         raise HTTPException(status_code=503, detail="Can't check free tries")
     if left == 0:
         raise HTTPException(status_code=402, detail="No free tries left")
+    if capped:
+        raise HTTPException(
+            status_code=429,
+            detail=f"That's {usage.PRO_MONTHLY} recipes this month, Pro's limit. "
+            "It starts again on the 1st.",
+        )
 
     kind, page, image = "write", None, None
     if body.base is not None:
