@@ -139,6 +139,7 @@ class Recipe {
     final notes = (json['notes'] as String?)?.trim() ?? '';
     return {...json, 'notes': notes.isEmpty ? old : '$old\n\n$notes'};
   }
+
   Map<String, dynamic> toJson() => _$RecipeToJson(this);
 
   Ingredient? ingredientById(String id) =>

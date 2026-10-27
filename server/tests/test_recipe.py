@@ -296,3 +296,49 @@ def test_a_site_that_blocks_apps_says_what_to_do(claude, db, web):
     assert response.status_code == 422
     assert "paste" in response.json()["errors"][0]
     assert claude.calls == []
+
+
+FORKS = {
+    "questions": [
+        {
+            "question": "What texture?",
+            "options": [
+                {"label": "Crisp and flat", "why": "Melted butter spreads them."},
+                {"label": "Tall and gooey", "why": "Cold butter keeps them thick."},
+            ],
+        },
+        {"question": "One option is no question", "options": [{"label": "x", "why": "y"}]},
+    ]
+}
+
+
+def ask(body: dict) -> httpx.Response:
+    return client.post("/questions", json=body, headers=bearer(token()))
+
+
+def test_questions_come_back_as_forks_and_spend_no_try(claude, db):
+    claude.answers = [FORKS]
+    response = ask({"idea": "chocolate chip cookies"})
+    assert response.status_code == 200
+    assert response.json()["questions"] == FORKS["questions"][:1]
+    assert not any(path == "/rest/v1/profiles" for _, path, _ in db.writes)
+    recorded = next(body for _, path, body in db.writes if path == "/rest/v1/usage")
+    assert recorded["kind"] == "questions"
+
+
+def test_the_second_round_sees_the_first_and_may_ask_nothing(claude, db):
+    claude.answers = [{"questions": []}]
+    response = ask({"idea": "cookies", "brief": "- What texture? Tall and gooey"})
+    assert response.json() == {"questions": []}
+    assert "Tall and gooey" in json.dumps(claude.calls[0])
+
+
+def test_questions_count_against_the_hourly_limit(claude, db, monkeypatch):
+    claude.answers = [FORKS]
+    monkeypatch.setattr(main, "RECIPE_LIMIT", 1)
+    assert ask({"idea": "cookies"}).status_code == 200
+    assert post({"text": "cookies"}).status_code == 429
+
+
+def test_questions_need_a_token(claude, db):
+    assert client.post("/questions", json={"idea": "cookies"}).status_code == 401

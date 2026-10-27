@@ -387,10 +387,32 @@ Every call that reached the model is a row in `usage`, failed ones too. Tries ar
 per user and a script can make users, so `/recipe` also has a per-IP hourly
 limit, the same window code as `/photos`. No `ANTHROPIC_API_KEY` is a 503, the
 empty-`PEXELS_KEY` rule; on the phone, no accounts or no `PHOTO_PROXY` hides the
-controls (`serverRecipesOn`), so `flutter test` never shows them. The waits are a
-blocking `whileWriting` dialog — an indefinite bar, which is fine only because
-tests never reach it. An adapted recipe saves through `saveVersion`, so the
+controls (`serverRecipesOn`), so `flutter test` never shows them. Import's waits are
+a blocking `whileWriting` dialog and Create's are a line in its chat
+(`writeOrUpgrade(inline: true)`) — both an indefinite bar, which is fine only
+because tests never reach either. An adapted recipe saves through `saveVersion`, so the
 history diff says what the model changed and Undo these changes takes it back.
+
+**Create asks before it writes, and the server keeps no conversation.** The list has
+two buttons: Import brings a recipe that exists (paste, url, photo), Create invents
+one from a sentence in [create_recipe_screen.dart](lib/recipe/ui/create_recipe_screen.dart).
+With "Ask me" on (`ask.meta`, on until turned off) the phone calls `POST /questions`
+before `/recipe`: two to four `Fork`s, each option a label and a *why*. Submit asks a
+second round, sending the first one's answers as `brief`; the server may answer none,
+and then Submit writes. There is no third round because the phone never asks for one.
+`brief()` in `recipe_server.dart` is the one place choices become words — the second
+round reads it and Create sends it as `/recipe`'s `text` — and `recipe.md` tells the
+model to explain those choices in `notes`. Questions spend no try but share `/recipe`'s
+hourly IP window and are a `usage` row of kind `questions`.
+
+The screen is laid out as a chat, not a form: the idea and each round's answers
+scroll above as bubbles, and the bottom holds one thing at a time — the growing
+composer with the Ask me chip, then each question in its place (a tap answers it and
+brings the next, back steps to the last), then "Anything else?" with Submit and
+Create. Waiting is a line with a bar at the end of the chat. `_step` counts the
+latest round's answered questions and is the whole of where the cook is; `_answered`
+is what decides both the bubbles and what `brief()` is given, so the two can't
+disagree about which choices were made.
 
 **Pro is asked about, never told.** There is no RevenueCat webhook. When a user's
 free tries are gone and `pro_until` is empty or past, `usage.tries_left` asks

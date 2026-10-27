@@ -346,6 +346,16 @@ class RecipeStore {
     onWrite?.call();
   }
 
+  /// Whether Create asks questions before writing, on until turned off. A
+  /// sidecar like the theme, and not synced: it is how this cook likes to
+  /// start, not part of the library.
+  File get _askMeFile => File('${dir.path}/ask.meta');
+
+  Future<bool> askMe() async =>
+      !_askMeFile.existsSync() || await _askMeFile.readAsString() != 'off';
+
+  Future<void> setAskMe(bool on) => _askMeFile.writeAsString(on ? 'on' : 'off');
+
   /// Everything sync carries, flattened to one value per key:
   /// `v/<id>` → `{recipe, parent}` with the *recorded* parent, `e/<version>/<entry>`
   /// → a cook entry, `units` → the [setUnitSystems] line. A key that isn't

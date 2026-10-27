@@ -6,7 +6,9 @@ import 'package:mise/recipe/recipe_models.dart';
 import 'package:mise/recipe/recipe_refs.dart';
 
 void main() {
-  final validJson = File('test/fixtures/valid/focaccia.json').readAsStringSync();
+  final validJson = File(
+    'test/fixtures/valid/focaccia.json',
+  ).readAsStringSync();
   final recipe = Recipe.fromJson(jsonDecode(validJson) as Map<String, dynamic>);
   final ingredients = recipe.ingredients;
 

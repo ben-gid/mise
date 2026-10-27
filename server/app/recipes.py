@@ -28,6 +28,7 @@ SCHEMA: dict = json.loads((ASSETS / "schemas/recipe_schema.json").read_text())
 PROMPT = (ASSETS / "prompts/recipe.md").read_text().replace(
     "{schema}", json.dumps(SCHEMA, indent=2)
 )
+QUESTIONS_PROMPT = (ASSETS / "prompts/questions.md").read_text()
 
 MODEL = "claude-haiku-5-5"
 # Per million tokens, prompts under 100K. Thinking is billed as output.
@@ -309,6 +310,67 @@ async def write(
             },
         ]
     raise RecipeFailed(errors, (tokens_in, tokens_out))
+
+
+_option = {
+    "type": "object",
+    "properties": {"label": {"type": "string"}, "why": {"type": "string"}},
+    "required": ["label", "why"],
+    "additionalProperties": False,
+}
+_questions_format = {
+    "type": "json_schema",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "questions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "question": {"type": "string"},
+                        "options": {"type": "array", "items": _option},
+                    },
+                    "required": ["question", "options"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["questions"],
+        "additionalProperties": False,
+    },
+}
+
+
+async def questions(idea: str, brief: str | None) -> tuple[list[dict], tuple[int, int]]:
+    """The forks worth putting to the cook before [idea] is written, and the
+    tokens they took. [brief] is the first round's answers, which makes this
+    the second and last round: it may come back empty, meaning write it now.
+
+    Trimmed here rather than trusted: the schema says the shape, not how many,
+    and a question with one option is not a question."""
+    text = f"The cook's idea: {idea}"
+    if brief:
+        text += f"\n\nWhat they chose in the first round:\n{brief}"
+    response = await _claude.messages.create(
+        model=MODEL,
+        max_tokens=4_000,
+        system=QUESTIONS_PROMPT,
+        messages=[{"role": "user", "content": text}],
+        output_config={"effort": "low", "format": _questions_format},
+    )
+    tokens = (response.usage.input_tokens, response.usage.output_tokens)
+    raw = next((b.text for b in response.content if b.type == "text"), "")
+    try:
+        asked = json.loads(raw)["questions"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return [], tokens
+    forks = [
+        {"question": q["question"], "options": q["options"][:4]}
+        for q in asked
+        if isinstance(q, dict) and len(q.get("options", [])) >= 2
+    ]
+    return forks[: 2 if brief else 4], tokens
 
 
 def cost(tokens: tuple[int, int]) -> float:

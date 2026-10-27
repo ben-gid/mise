@@ -20,7 +20,9 @@ import 'package:mise/recipe/ui/settings_screen.dart';
 /// these tests cover the wiring.
 void main() {
   final parser = RecipeParser(File(recipeSchemaAsset).readAsStringSync());
-  final validJson = File('test/fixtures/valid/focaccia.json').readAsStringSync();
+  final validJson = File(
+    'test/fixtures/valid/focaccia.json',
+  ).readAsStringSync();
 
   late Directory dir;
   late RecipeStore store;
@@ -112,7 +114,7 @@ void main() {
   }
 
   Future<void> openImport(WidgetTester tester) async {
-    await tester.tap(find.widgetWithText(FloatingActionButton, 'Import recipe'));
+    await tester.tap(find.widgetWithText(FloatingActionButton, 'Import'));
     await tester.pumpAndSettle();
   }
 
@@ -755,9 +757,7 @@ void main() {
   /// what the old AppBar scoping was standing in for.
   Future<void> saveVersion(WidgetTester tester, String expectTitle) async {
     await tester.runAsync(() async {
-      await tester.tap(
-        find.widgetWithText(FilledButton, 'Save version'),
-      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Save version'));
       await pumpUntil(
         tester,
         () => titleText(expectTitle).evaluate().isNotEmpty,

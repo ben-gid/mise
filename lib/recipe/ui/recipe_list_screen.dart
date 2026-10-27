@@ -5,8 +5,10 @@ import 'package:flutter/services.dart';
 import '../recipe_image.dart';
 import '../recipe_models.dart';
 import '../recipe_parser.dart';
+import '../recipe_server.dart' show serverRecipesOn;
 import '../recipe_store.dart';
 import '../recipe_sync.dart';
+import 'create_recipe_screen.dart';
 import 'glass.dart';
 import 'import_recipe_screen.dart';
 import 'recipe_detail_screen.dart';
@@ -81,13 +83,11 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
     if (mounted) _reload();
   }
 
-  Future<void> _openImport() async {
+  /// Import or Create, which both pop with the recipe they saved.
+  Future<void> _openNew(Widget screen) async {
     final imported = await Navigator.push<SavedRecipe>(
       context,
-      MaterialPageRoute(
-        builder: (_) =>
-            ImportRecipeScreen(store: widget.store, parser: widget.parser),
-      ),
+      MaterialPageRoute(builder: (_) => screen),
     );
     if (imported == null || !mounted) return;
     _reload();
@@ -134,21 +134,33 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
         floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
         // Tinted glass, the way iOS draws a primary action floating over
         // content: the grid scrolls under it and shows through the herb.
-        floatingActionButton: frost(
-          context: context,
-          shape: const StadiumBorder(),
-          tint: theme.colorScheme.primary.withValues(alpha: 0.86),
-          lift: true,
-          child: FloatingActionButton.extended(
-            onPressed: _openImport,
-            backgroundColor: Colors.transparent,
-            elevation: 0,
-            focusElevation: 0,
-            hoverElevation: 0,
-            highlightElevation: 0,
-            icon: const Icon(Icons.add),
-            label: const Text('Import recipe'),
-          ),
+        // Tinted glass, the way iOS draws a primary action floating over
+        // content: the grid scrolls under it and shows through the herb.
+        // Create only where the server can write, which tests never are.
+        floatingActionButton: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _NewButton(
+              icon: Icons.add,
+              label: 'Import',
+              onPressed: () => _openNew(
+                ImportRecipeScreen(store: widget.store, parser: widget.parser),
+              ),
+            ),
+            if (serverRecipesOn) ...[
+              const SizedBox(width: 12),
+              _NewButton(
+                icon: Icons.auto_awesome_outlined,
+                label: 'Create',
+                onPressed: () => _openNew(
+                  CreateRecipeScreen(
+                    store: widget.store,
+                    parser: widget.parser,
+                  ),
+                ),
+              ),
+            ],
+          ],
         ),
         body: FutureBuilder<_Library>(
           future: _library,
@@ -603,8 +615,8 @@ class _EmptyState extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               Text(
-                'Tap Import recipe to paste one from an LLM. “Copy prompt” '
-                'there gets it in the right shape.',
+                'Tap Import to paste one from an LLM. “Copy prompt” there '
+                'gets it in the right shape.',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodyLarge?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
@@ -616,4 +628,36 @@ class _EmptyState extends StatelessWidget {
       ),
     );
   }
+}
+
+/// One of the two floating pills, Import and Create.
+class _NewButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onPressed;
+
+  const _NewButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) => frost(
+    context: context,
+    shape: const StadiumBorder(),
+    tint: Theme.of(context).colorScheme.primary.withValues(alpha: 0.86),
+    lift: true,
+    child: FloatingActionButton.extended(
+      heroTag: label,
+      onPressed: onPressed,
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      focusElevation: 0,
+      hoverElevation: 0,
+      highlightElevation: 0,
+      icon: Icon(icon),
+      label: Text(label),
+    ),
+  );
 }

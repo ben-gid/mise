@@ -92,12 +92,44 @@ class RecipeRequest(BaseModel):
     is the change to make to it; [url] is a page and [image] a photo of one,
     base64."""
 
-    text: str | None = Field(None, min_length=1, max_length=2000)
+    # Room for an idea plus the answers to two rounds of questions.
+    text: str | None = Field(None, min_length=1, max_length=6000)
     url: str | None = Field(None, max_length=2000)
     # A phone photo shrunk to 1600px is well under this.
     image: str | None = Field(None, max_length=8_000_000)
     image_type: Literal["image/jpeg", "image/png", "image/webp"] = "image/jpeg"
     base: dict | None = None
+
+
+class QuestionsRequest(BaseModel):
+    """The cook's idea, and [brief] — the first round's answers as the phone
+    words them — when this is the second round. There is no third: the phone
+    never asks for one, and the server has nothing to ask it with."""
+
+    idea: str = Field(min_length=1, max_length=2000)
+    brief: str | None = Field(None, max_length=4000)
+
+
+@app.post("/questions", tags=["recipes"])
+async def ask_questions(body: QuestionsRequest, request: Request, user: User) -> dict:
+    """Forks to put to the cook before a recipe is written; an empty list means
+    there is nothing worth asking. Free: only the recipe at the end spends a
+    try, so a cook out of them can still think it through and meet the paywall
+    at Create. The hourly limit is shared with /recipe, which is what keeps a
+    script from looping this."""
+    if not settings.ANTHROPIC_API_KEY.get_secret_value():
+        raise HTTPException(status_code=503, detail="Recipe writing isn't set up")
+    if not _allow(_recipe_windows, _caller(request), RECIPE_LIMIT):
+        raise HTTPException(
+            status_code=429,
+            detail="That is a lot of recipes for one hour. Try again later.",
+        )
+    try:
+        forks, tokens = await recipes.questions(body.idea, body.brief)
+    except anthropic.APIError:
+        raise HTTPException(status_code=502, detail="Couldn't think of questions")
+    await usage.record(user["sub"], "questions", tokens, recipes.cost(tokens), ok=True)
+    return {"questions": forks}
 
 
 def _refused(*errors: str) -> JSONResponse:

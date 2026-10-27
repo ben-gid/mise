@@ -106,3 +106,10 @@ Mise Pro: $4.99 a month or $49.99 a year, one `pro` entitlement in RevenueCat.
 - [ ] The app built and run on a phone with `purchases_flutter` in it
 - [ ] A sandbox purchase, a Restore after reinstalling, and the 200 cap verified on
       both phones
+
+### Phase 6 — Ask me on a saved recipe
+
+The Create page's question rounds, pointed at a recipe already in the library, to explore
+a variation of it as a new version. Nothing decided yet.
+
+- [ ] decide: where it starts, how many rounds, and what it costs

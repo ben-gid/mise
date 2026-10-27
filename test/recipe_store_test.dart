@@ -8,7 +8,9 @@ import 'package:mise/recipe/recipe_store.dart';
 
 void main() {
   final parser = RecipeParser(File(recipeSchemaAsset).readAsStringSync());
-  final validJson = File('test/fixtures/valid/focaccia.json').readAsStringSync();
+  final validJson = File(
+    'test/fixtures/valid/focaccia.json',
+  ).readAsStringSync();
 
   late Directory dir;
   late RecipeStore store;
@@ -379,6 +381,14 @@ void main() {
 
     expect(await RecipeStore(dir).themeName(), 'dark');
     expect(await store.loadAll(), hasLength(1));
+  });
+
+  test('Ask me starts on and remembers being turned off', () async {
+    expect(await store.askMe(), isTrue);
+
+    await store.setAskMe(false);
+
+    expect(await RecipeStore(dir).askMe(), isFalse);
   });
 
   test('a corrupt file is skipped, not fatal', () async {

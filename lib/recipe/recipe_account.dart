@@ -49,10 +49,7 @@ GoTrueClient get _auth => Supabase.instance.client.auth;
 /// open in a kitchen with no signal has its priorities wrong.
 Future<void> startAccount() async {
   if (!accountsOn) return;
-  await Supabase.initialize(
-    url: _supabaseUrl,
-    publishableKey: _publishableKey,
-  );
+  await Supabase.initialize(url: _supabaseUrl, publishableKey: _publishableKey);
   _show(_auth.currentUser);
   _auth.onAuthStateChange.listen((state) => _show(state.session?.user));
   // Offline at launch is the case this covers: the next time the app comes
@@ -107,8 +104,11 @@ Future<void> _linkOrSignIn(
   String idToken, {
   String? nonce,
 }) {
-  Future<void> signIn() =>
-      _auth.signInWithIdToken(provider: provider, idToken: idToken, nonce: nonce);
+  Future<void> signIn() => _auth.signInWithIdToken(
+    provider: provider,
+    idToken: idToken,
+    nonce: nonce,
+  );
   // No session at all — anonymous sign-in never got through — is nothing to
   // link to.
   if (_auth.currentUser == null) return signIn();

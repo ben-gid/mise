@@ -7,7 +7,9 @@ import 'package:mise/recipe/recipe_parser.dart';
 
 void main() {
   final parser = RecipeParser(File(recipeSchemaAsset).readAsStringSync());
-  final validJson = File('test/fixtures/valid/focaccia.json').readAsStringSync();
+  final validJson = File(
+    'test/fixtures/valid/focaccia.json',
+  ).readAsStringSync();
 
   /// Invalid fixtures are the valid one with a single mutation applied, so each
   /// test pins exactly one failure.

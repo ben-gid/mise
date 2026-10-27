@@ -11,13 +11,16 @@ import 'import_recipe_screen.dart' show whileWriting;
 /// [whileWriting] for a server recipe, with the paywall in the way of a 402:
 /// buying Pro there asks again, so the recipe the cook was waiting for still
 /// comes. Backing out rethrows, and the caller says what it always said.
+/// [inline] skips the dialog, for a screen that shows its own progress.
 Future<String> writeOrUpgrade(
   BuildContext context,
   String message,
-  Future<String> Function() ask,
-) async {
+  Future<String> Function() ask, {
+  bool inline = false,
+}) async {
+  Future<String> wait() => inline ? ask() : whileWriting(context, message, ask);
   try {
-    return await whileWriting(context, message, ask);
+    return await wait();
   } on OutOfTriesException {
     if (!proOn || !context.mounted) rethrow;
     final bought = await Navigator.push<bool>(
@@ -25,7 +28,7 @@ Future<String> writeOrUpgrade(
       MaterialPageRoute(builder: (_) => const ProScreen()),
     );
     if (bought != true || !context.mounted) rethrow;
-    return whileWriting(context, message, ask);
+    return wait();
   }
 }
 

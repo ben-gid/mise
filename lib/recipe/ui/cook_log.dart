@@ -59,7 +59,12 @@ class CookEntryLine extends StatelessWidget {
   final Color? accent;
   final VoidCallback? onTap;
 
-  const CookEntryLine({super.key, required this.entry, this.accent, this.onTap});
+  const CookEntryLine({
+    super.key,
+    required this.entry,
+    this.accent,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {

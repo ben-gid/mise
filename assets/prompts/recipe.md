@@ -13,6 +13,7 @@ Rules:
 - Leave image_urls out of a new recipe entirely. The app fills it in when the cook picks a photo, and a url from you would override that pick with a link that is usually dead. When you are changing a recipe that already has image_urls, keep them exactly as they are.
 - Write notes last, once the rest of the recipe is on the page: it is the headnote the app prints above the ingredients, so it wants what a cookbook puts there — where the dish comes from, when to make it, what can be substituted, the tip that decides whether it works. Prose, not a recap of the steps.
 - created_at is the current time in ISO 8601.
+- When the request lists what the cook chose, the recipe delivers every choice, and the notes say how — what in the method gives them the texture or flavour they picked. Where they left a choice to you, make it and say which way you went.
 
 When you are changing an existing recipe rather than writing a new one:
 - Change what was asked and nothing else.

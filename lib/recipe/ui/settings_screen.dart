@@ -82,11 +82,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         for (final (by, label, example) in const [
           (MeasureBy.asWritten, 'As written', 'However each recipe saved it'),
           (MeasureBy.weight, 'Weight', 'On a scale wherever it can be'),
-          (
-            MeasureBy.volume,
-            'Volume',
-            'In cups and spoons wherever it can be',
-          ),
+          (MeasureBy.volume, 'Volume', 'In cups and spoons wherever it can be'),
         ])
           _Choice(
             label: label,

@@ -32,7 +32,8 @@ class _ImportRecipeScreenState extends State<ImportRecipeScreen> {
   final _controller = TextEditingController();
   List<String> _errors = const [];
 
-  /// A dish, an idea or a link, for the server to write up.
+  /// A recipe link, for the server to read. A dish described in words is
+  /// Create's, where the questions are.
   final _ask = TextEditingController();
   List<String> _askErrors = const [];
 
@@ -43,9 +44,9 @@ class _ImportRecipeScreenState extends State<ImportRecipeScreen> {
     super.dispose();
   }
 
-  /// One box for a sentence and a link: a link is the whole box and nothing
-  /// else, which no description of a dish ever is.
-  Future<void> _write() async {
+  /// A link is the whole box and nothing else, which no description of a
+  /// dish ever is — so anything else is pointed at Create.
+  Future<void> _read() async {
     final text = _ask.text.trim();
     if (text.isEmpty) return;
     final link = Uri.tryParse(text);
@@ -54,10 +55,11 @@ class _ImportRecipeScreenState extends State<ImportRecipeScreen> {
         link != null &&
         (link.isScheme('https') || link.isScheme('http')) &&
         link.host.isNotEmpty;
-    await _fromServer(
-      isLink ? 'Reading the page…' : 'Writing the recipe…',
-      () => isLink ? askForRecipe(url: text) : askForRecipe(text: text),
-    );
+    if (!isLink) {
+      _say('That isn\'t a link. To describe a dish, use Create.');
+      return;
+    }
+    await _fromServer('Reading the page…', () => askForRecipe(url: text));
   }
 
   Future<void> _fromPhoto() async {
@@ -91,9 +93,7 @@ class _ImportRecipeScreenState extends State<ImportRecipeScreen> {
     setState(() => _askErrors = const []);
     final Recipe recipe;
     try {
-      recipe = widget.parser.parse(
-        await writeOrUpgrade(context, message, ask),
-      );
+      recipe = widget.parser.parse(await writeOrUpgrade(context, message, ask));
     } on RecipeValidationException catch (e) {
       if (mounted) setState(() => _askErrors = e.errors);
       return;
@@ -157,33 +157,31 @@ class _ImportRecipeScreenState extends State<ImportRecipeScreen> {
       ),
       children: [
         if (serverRecipesOn) ...[
-          Text('Have mise write it', style: theme.textTheme.titleMedium),
+          Text('From a link or a photo', style: theme.textTheme.titleMedium),
           const SizedBox(height: 4),
           Text(
-            'Describe a dish, paste a recipe link, or pick a photo of a '
-            'cookbook page.',
+            'Paste a recipe link, or pick a photo of a cookbook page.',
             style: muted,
           ),
           if (_askErrors.isNotEmpty)
             ErrorList(
               errors: _askErrors,
-              tip: 'Try again, or say it a different way.',
+              tip: 'Try again, or try another link.',
             ),
           const SizedBox(height: 10),
           TextField(
             controller: _ask,
             textInputAction: TextInputAction.go,
-            onSubmitted: (_) => _write(),
-            decoration: const InputDecoration(
-              hintText: 'Lemon drizzle cake for eight',
-            ),
+            onSubmitted: (_) => _read(),
+            keyboardType: TextInputType.url,
+            decoration: const InputDecoration(hintText: 'https://…'),
           ),
           const SizedBox(height: 10),
           Row(
             children: [
               FilledButton.tonal(
-                onPressed: _write,
-                child: const Text('Write it'),
+                onPressed: _read,
+                child: const Text('Read it'),
               ),
               const SizedBox(width: 10),
               OutlinedButton.icon(
@@ -433,4 +431,4 @@ String _prompt(RecipeParser parser) =>
     'that block — no comments, no notes, no text before or after the object. '
     'Anything you want to tell me about the recipe goes outside the block. '
     'I will copy that block and paste it into mise: open the app, tap '
-    'Import recipe, tap Paste, then tap Import.';
+    'Import, tap Paste, then tap Import.';
