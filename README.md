@@ -94,6 +94,15 @@ Mise Pro: $4.99 a month or $49.99 a year, one `pro` entitlement in RevenueCat.
 - [x] Paywall when the free tries run out, which retries the recipe after a purchase;
       Restore purchases; a Mise Pro panel in Settings
 - [x] Pro is capped at 200 recipes a month, about $1 of model time
-- [ ] Subscriptions created in App Store Connect and the Play Console, with store
-      credentials in RevenueCat and the secret key in `server/.env`
-- [ ] A sandbox purchase verified on both phones
+- [x] RevenueCat project `mise`: iOS and Android apps, `pro` entitlement, default
+      offering with Monthly and Yearly packages
+- [ ] Subscriptions in App Store Connect (`mise_pro_monthly`, `mise_pro_annual`, one
+      group) and the Play Console (`mise_pro` with `monthly` and `annual` base plans)
+- [ ] Store credentials in RevenueCat: the In-App Purchase key on iOS, a service
+      account on Play
+- [ ] RevenueCat's v1 secret key in `server/.env` as `REVENUECAT_SECRET_KEY`, then
+      `scripts/deploy.sh`
+- [ ] Terms and Privacy links on the paywall, which App Review requires for a subscription
+- [ ] The app built and run on a phone with `purchases_flutter` in it
+- [ ] A sandbox purchase, a Restore after reinstalling, and the 200 cap verified on
+      both phones
