@@ -82,7 +82,10 @@ One `POST /recipe` on the existing FastAPI service, on Claude Haiku 5.5.
 - [x] Usage table recording each call's cost; five free tries per account, anonymous
       ones included, spent only by a recipe that passes
 - [ ] Haiku checked against real URLs and cookbook photos (`server/eval/`) before
-      `/import` ships
+      `/import` ships. URLs and text cases are in `server/eval/cases.json`; still to add
+      are cookbook photos (`{"photo": "eval/photos/x.jpg"}`, relative to `server/`).
+      Run where your key lives (real Haiku calls, a few cents):
+      `cd server && ANTHROPIC_API_KEY=sk-ant-... uv run python -m eval.run`
 
 ### Phase 5 — Payments
 
