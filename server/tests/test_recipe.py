@@ -48,12 +48,17 @@ def claude(monkeypatch):
 
 @pytest.fixture
 def db(monkeypatch):
-    """Stands in for PostgREST: one profile, and every write recorded."""
-    fake = SimpleNamespace(profile={"pro_until": None, "free_tries_used": 0}, writes=[])
+    """Stands in for PostgREST: one profile, `made` recipes this month, and
+    every write recorded."""
+    fake = SimpleNamespace(
+        profile={"pro_until": None, "free_tries_used": 0}, made=0, writes=[]
+    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.method == "GET":
             return httpx.Response(200, json=[fake.profile])
+        if request.method == "HEAD":
+            return httpx.Response(200, headers={"content-range": f"*/{fake.made}"})
         fake.writes.append((request.method, request.url.path, json.loads(request.content)))
         return httpx.Response(204)
 
@@ -127,6 +132,69 @@ def test_pro_spends_no_tries(claude, db):
     db.profile = {"pro_until": later, "free_tries_used": usage.FREE_TRIES}
     assert post({"text": "focaccia"}).status_code == 200
     assert not any(path == "/rest/v1/profiles" for _, path, _ in db.writes)
+
+
+@pytest.fixture
+def revenuecat(monkeypatch):
+    """Stands in for RevenueCat: `expires` is the pro entitlement's expiry, None
+    for no entitlement; `status` an error to answer instead."""
+    fake = SimpleNamespace(expires=None, status=None, asked=[])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        fake.asked.append(request.url.path)
+        if fake.status:
+            return httpx.Response(fake.status)
+        entitlements = {}
+        if fake.expires:
+            entitlements["pro"] = {"expires_date": fake.expires.isoformat()}
+        return httpx.Response(200, json={"subscriber": {"entitlements": entitlements}})
+
+    monkeypatch.setattr(settings, "REVENUECAT_SECRET_KEY", SecretStr("sk_test"))
+    monkeypatch.setattr(
+        usage,
+        "_revenuecat",
+        httpx.AsyncClient(
+            base_url="https://api.revenuecat.com/v1",
+            transport=httpx.MockTransport(handler),
+        ),
+    )
+    return fake
+
+
+def test_a_new_subscriber_is_asked_about_and_remembered(claude, db, revenuecat):
+    db.profile["free_tries_used"] = usage.FREE_TRIES
+    revenuecat.expires = datetime.now(timezone.utc) + timedelta(days=30)
+    assert post({"text": "focaccia"}).status_code == 200
+    assert revenuecat.asked and revenuecat.asked[0].endswith("/subscribers/user-1")
+    kept = next(body for _, path, body in db.writes if "pro_until" in body)
+    assert datetime.fromisoformat(kept["pro_until"]) == revenuecat.expires
+
+
+def test_a_lapsed_subscription_is_a_402(claude, db, revenuecat):
+    db.profile["free_tries_used"] = usage.FREE_TRIES
+    revenuecat.expires = datetime.now(timezone.utc) - timedelta(days=1)
+    assert post({"text": "focaccia"}).status_code == 402
+
+
+def test_revenuecat_failing_is_a_503_not_a_paywall(claude, db, revenuecat):
+    db.profile["free_tries_used"] = usage.FREE_TRIES
+    revenuecat.status = 500
+    assert post({"text": "focaccia"}).status_code == 503
+
+
+def test_free_tries_left_never_ask_revenuecat(claude, db, revenuecat):
+    assert post({"text": "focaccia"}).status_code == 200
+    assert revenuecat.asked == []
+
+
+def test_pro_stops_at_the_monthly_cap(claude, db):
+    later = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+    db.profile = {"pro_until": later, "free_tries_used": usage.FREE_TRIES}
+    db.made = usage.PRO_MONTHLY
+    response = post({"text": "focaccia"})
+    assert response.status_code == 429
+    assert "1st" in response.json()["detail"]
+    assert claude.calls == []
 
 
 def test_needs_a_token(claude, db):

@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     # Empty is allowed for the same reason: /recipe is a 503 without it, which
     # the app reads as "server recipes aren't available", and pasting still works.
     ANTHROPIC_API_KEY: SecretStr = SecretStr("")
+    # RevenueCat's v1 secret key (sk_…), for asking whether a user is Pro.
+    # Empty is allowed: nobody becomes Pro, and the free tries work as before.
+    REVENUECAT_SECRET_KEY: SecretStr = SecretStr("")
     # The project, for its public keys (JWKS) and its admin API.
     SUPABASE_URL: str
     # Deletes users. Server-only: it bypasses every RLS policy.

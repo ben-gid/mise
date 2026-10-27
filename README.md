@@ -86,7 +86,14 @@ One `POST /recipe` on the existing FastAPI service, on Claude Haiku 5.5.
 
 ### Phase 5 — Payments
 
-- [ ] RevenueCat subscription with the Supabase user id as its app user id
-- [ ] Webhook sets `pro_until`
-- [ ] Paywall when the free tries run out; Restore purchases
-- [ ] Monthly cost cap per user at about 80% of net proceeds (after the store's cut)
+Mise Pro: $4.99 a month or $49.99 a year, one `pro` entitlement in RevenueCat.
+
+- [x] RevenueCat subscription with the Supabase user id as its app user id
+- [x] The server asks RevenueCat when the free tries are gone and keeps the expiry in
+      `pro_until`, rather than running a webhook
+- [x] Paywall when the free tries run out, which retries the recipe after a purchase;
+      Restore purchases; a Mise Pro panel in Settings
+- [x] Pro is capped at 200 recipes a month, about $1 of model time
+- [ ] Subscriptions created in App Store Connect and the Play Console, with store
+      credentials in RevenueCat and the secret key in `server/.env`
+- [ ] A sandbox purchase verified on both phones

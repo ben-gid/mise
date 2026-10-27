@@ -13,8 +13,8 @@
 # Once per machine:
 #   supabase login && supabase link --project-ref mpaulmfgrdnerbepehnt
 #   gcloud auth login
-# and server/.env holding SUPABASE_SECRET_KEY (and PEXELS_KEY and
-# ANTHROPIC_API_KEY, both optional), which become Secret Manager secrets the
+# and server/.env holding SUPABASE_SECRET_KEY (and PEXELS_KEY,
+# ANTHROPIC_API_KEY and REVENUECAT_SECRET_KEY, all optional), which become Secret Manager secrets the
 # first time they're missing. Once they exist, any machine can deploy without
 # the .env.
 set -euo pipefail
@@ -89,6 +89,9 @@ ensure_secret pexels-key PEXELS_KEY ||
 # available here", and pasting a recipe works as it always has.
 ensure_secret anthropic-key ANTHROPIC_API_KEY ||
   echo "No Anthropic key: deploying without recipe writing."
+# Optional: without it nobody is Pro, and the five free tries work as before.
+ensure_secret revenuecat-key REVENUECAT_SECRET_KEY ||
+  echo "No RevenueCat key: deploying without Pro."
 
 step "Deploying $SERVICE"
 # --max-instances also caps the per-instance rate limits' multiplier; see

@@ -1317,5 +1317,6 @@ void main() {
     expect(find.text('Measure by'), findsOneWidget);
     expect(find.text('Account'), findsNothing);
     expect(find.text('Continue with Google'), findsNothing);
+    expect(find.text('Mise Pro'), findsNothing);
   });
 }
