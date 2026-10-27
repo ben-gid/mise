@@ -386,6 +386,9 @@ constructed once in `main()` and passed down by constructor.
   mocks the channel to a temp dir for every test file; that is why no individual
   test opts in, and why deleting that file breaks tests that never mention
   images.
+  On macOS (as on the phones) the cache keeps its index in sqflite, where Linux
+  uses a JSON file, so the same file also sets sqflite's `databaseFactory` to
+  the FFI one — without it the photo tests pass on Linux and hang on a Mac.
 - A test that resolves an https url must let the request finish before it ends,
   inside `runAsync`, even when its assertion has already passed —
   `flutter_cache_manager` takes a lock per request and one abandoned mid-flight
