@@ -61,6 +61,7 @@ dev_dependencies:
   build_runner: ^2.15.1
   flutter_launcher_icons: ^0.14.4
   flutter_native_splash: ^2.4.6
+  sqflite_common_ffi: ^2.4.5
 
 # Launcher icon and splash are generated once into android/ and ios/ by
 # `dart run flutter_launcher_icons` and `dart run flutter_native_splash:create`.
