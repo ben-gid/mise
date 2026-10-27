@@ -7,7 +7,7 @@ import 'package:mise/recipe/recipe_parser.dart';
 
 void main() {
   final parser = RecipeParser(File(recipeSchemaAsset).readAsStringSync());
-  final validJson = File('test/fixtures/valid_recipe.json').readAsStringSync();
+  final validJson = File('test/fixtures/valid/focaccia.json').readAsStringSync();
 
   /// Invalid fixtures are the valid one with a single mutation applied, so each
   /// test pins exactly one failure.
@@ -25,6 +25,15 @@ void main() {
       return e.errors;
     }
   }
+
+  test('the shared prompt carries the live schema', () {
+    final withPrompt = RecipeParser(
+      parser.schemaJson,
+      promptTemplate: File(recipePromptAsset).readAsStringSync(),
+    );
+    expect(withPrompt.prompt, contains(parser.schemaJson));
+    expect(withPrompt.prompt, isNot(contains('{schema}')));
+  });
 
   test('valid recipe parses cleanly', () {
     final recipe = parser.parse(validJson);

@@ -14,8 +14,9 @@ flutter run                               # a phone/tablet device or emulator �
 flutter run -d linux                      # desktop, only to eyeball a change quickly
 flutter run --dart-define-from-file=env.json   # with photos and accounts; see env.example.json
 
-# server/ — photo search proxy + account routes (FastAPI, uv, Cloud Run)
+# server/ — photo search proxy, account routes, recipes (FastAPI, uv, Cloud Run)
 cd server && uv run pytest
+cd server && uv run python -m eval.run   # real Haiku calls on eval/cases.json; costs cents
 cd server && uv run uvicorn app.main:app --reload   # needs server/.env (SUPABASE_*; PEXELS_KEY optional)
 
 # Ship: all tests, then Supabase migrations, then Cloud Run → api.mise.bengid.dev
@@ -60,7 +61,7 @@ at once; it never crashes on bad input. Don't add a code path that calls `Recipe
 directly on untrusted JSON — that's what the exception type exists to prevent.
 
 **The schema is the source of truth, in three places at once.** Changing the recipe shape
-means editing the schema, the models, and `test/fixtures/valid_recipe.json` together, then
+means editing the schema, the models, and `test/fixtures/valid/focaccia.json` together, then
 re-running build_runner. The import screen's "Copy prompt" button embeds
 `RecipeParser.schemaJson` verbatim so the LLM prompt can never drift from what the validator
 enforces — keep it reading from the live schema string, not a hardcoded copy.
@@ -357,6 +358,39 @@ Permission is asked on the first timer, not at launch. Android 14 denies exact a
 to new installs by default, so it schedules exact when allowed and inexact (can land
 minutes late) when not. Timers are in memory only: if the process dies the
 notification still fires but the step shows Start again.
+
+**The server writes recipes; the phone still decides whether they are recipes.**
+`POST /recipe` in [server/app/main.py](server/app/main.py) takes one kind of
+material — a sentence, a sentence plus a `base` recipe to change, a url, or a
+base64 photo — and answers a recipe as JSON or a 422 whose `errors` the phone
+throws as `RecipeValidationException`, so it lands in the same `ErrorList` a bad
+paste does. [server/app/recipes.py](server/app/recipes.py) reads
+`assets/schemas/recipe_schema.json` and `assets/prompts/recipe.md` from the repo
+itself — that is why the `Dockerfile` and `.gcloudignore` sit at the root and
+`deploy.sh` deploys `--source .` — and `RecipeParser.prompt` puts the same file
+behind both Copy buttons, so the paste path and the server can't drift apart.
+`problems` is the server's copy of the parser's verdict (jsonschema plus the
+`{id}` check); `test/fixtures/valid/` and `invalid/` are walked by
+`test/shared_fixtures_test.dart` and `server/tests/test_validate.py` alike, so a
+case added to one folder is held to both. Structured outputs only get the shape
+right — `transform_schema` moves lengths and ranges into descriptions — so
+`problems` is what decides, and a failure goes back to the model with its errors
+at most twice. What the model can't know is set after it answers, not asked
+for: `created_at`, the url as `source`, and `image_urls` (empty, or the base
+recipe's photos). A url is fetched by the server, each redirect hop checked to
+resolve to a public address — Cloud Run's metadata server is one hop away — and
+its schema.org `Recipe` JSON-LD is sent when the page has one, its text when not.
+
+Five free tries per user, anonymous included, in `profiles.free_tries_used`; only
+a recipe that passes spends one, and a `pro_until` in the future spends none.
+Every call that reached the model is a row in `usage`, failed ones too. Tries are
+per user and a script can make users, so `/recipe` also has a per-IP hourly
+limit, the same window code as `/photos`. No `ANTHROPIC_API_KEY` is a 503, the
+empty-`PEXELS_KEY` rule; on the phone, no accounts or no `PHOTO_PROXY` hides the
+controls (`serverRecipesOn`), so `flutter test` never shows them. The waits are a
+blocking `whileWriting` dialog — an indefinite bar, which is fine only because
+tests never reach it. An adapted recipe saves through `saveVersion`, so the
+history diff says what the model changed and Undo these changes takes it back.
 
 **No state management package and none wanted** — three screens over one store, plain
 `StatefulWidget` + `setState`, `Navigator.push` between them. The store and parser are

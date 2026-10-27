@@ -8,7 +8,7 @@ import 'package:mise/recipe/recipe_store.dart';
 
 void main() {
   final parser = RecipeParser(File(recipeSchemaAsset).readAsStringSync());
-  final validJson = File('test/fixtures/valid_recipe.json').readAsStringSync();
+  final validJson = File('test/fixtures/valid/focaccia.json').readAsStringSync();
 
   late Directory dir;
   late RecipeStore store;

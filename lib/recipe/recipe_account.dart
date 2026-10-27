@@ -30,6 +30,11 @@ const _server = String.fromEnvironment('PHOTO_PROXY');
 
 bool get accountsOn => _supabaseUrl.isNotEmpty;
 
+/// What the server is shown to prove who is asking; null before a session
+/// exists. Supabase refreshes it in the background, so it is read per request.
+String? get accessToken =>
+    accountsOn ? _auth.currentSession?.accessToken : null;
+
 /// Who this phone is signed in as: [email] is null for the anonymous user every
 /// install starts as. Null itself until a session exists, which offline can be
 /// a while — nothing in the app waits on it.

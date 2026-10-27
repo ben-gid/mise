@@ -9,11 +9,13 @@ import '../recipe_image.dart';
 import '../recipe_models.dart';
 import '../recipe_parser.dart';
 import '../recipe_scaling.dart';
+import '../recipe_server.dart';
 import '../recipe_store.dart';
 import '../recipe_sync.dart';
 import '../recipe_timers.dart';
 import 'cook_log.dart';
 import 'glass.dart';
+import 'import_recipe_screen.dart' show whileWriting;
 import 'recipe_edit_screen.dart';
 import 'recipe_history_screen.dart';
 
@@ -329,6 +331,40 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
     if (saved != null && mounted) _adopt(saved);
   }
 
+  /// Has the server make [change] to this recipe, as a new version: the
+  /// history diff then says exactly what it did, and Undo these changes takes
+  /// it back. True once it is saved, so the box can clear.
+  Future<bool> _adapt(String change) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final Recipe recipe;
+    try {
+      recipe = widget.parser.parse(
+        await whileWriting(
+          context,
+          'Changing the recipe…',
+          () => askForRecipe(text: change, base: _recipe.toJson()),
+        ),
+      );
+    } on RecipeValidationException catch (e) {
+      final count = e.errors.length;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Couldn\'t make that change — the result had $count '
+            'problem${count == 1 ? '' : 's'}. Nothing was saved.',
+          ),
+        ),
+      );
+      return false;
+    } on ServerRecipeException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+      return false;
+    }
+    final saved = await widget.store.saveVersion(recipe, parent: _id);
+    if (mounted) _adopt(saved);
+    return true;
+  }
+
   Future<void> _openHistory() async {
     final restored = await Navigator.push<SavedRecipe>(
       context,
@@ -518,6 +554,10 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
                       ),
                     ),
                   const SizedBox(height: 30),
+                  if (serverRecipesOn) ...[
+                    _AdaptBox(onSubmit: _adapt),
+                    const SizedBox(height: 30),
+                  ],
                 ],
               ),
             ),
@@ -649,6 +689,53 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
           ),
         );
       },
+    );
+  }
+}
+
+/// One line for asking the server to change the recipe: "make it vegetarian",
+/// "halve the sugar". Under the method, where it is in reach once the recipe
+/// has been read and out of the way while it is being cooked.
+class _AdaptBox extends StatefulWidget {
+  final Future<bool> Function(String change) onSubmit;
+
+  const _AdaptBox({required this.onSubmit});
+
+  @override
+  State<_AdaptBox> createState() => _AdaptBoxState();
+}
+
+class _AdaptBoxState extends State<_AdaptBox> {
+  final _change = TextEditingController();
+
+  @override
+  void dispose() {
+    _change.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final change = _change.text.trim();
+    if (change.isEmpty) return;
+    FocusScope.of(context).unfocus();
+    if (await widget.onSubmit(change) && mounted) _change.clear();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: _change,
+      textInputAction: TextInputAction.send,
+      onSubmitted: (_) => _submit(),
+      decoration: InputDecoration(
+        labelText: 'Change this recipe',
+        hintText: 'Make it vegetarian',
+        suffixIcon: IconButton(
+          onPressed: _submit,
+          tooltip: 'Change it',
+          icon: const Icon(Icons.auto_awesome_outlined),
+        ),
+      ),
     );
   }
 }

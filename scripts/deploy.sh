@@ -13,8 +13,10 @@
 # Once per machine:
 #   supabase login && supabase link --project-ref mpaulmfgrdnerbepehnt
 #   gcloud auth login
-# and server/.env holding SUPABASE_SECRET_KEY (and PEXELS_KEY, optional), which
-# become Secret Manager secrets the first time they're missing.
+# and server/.env holding SUPABASE_SECRET_KEY (and PEXELS_KEY and
+# ANTHROPIC_API_KEY, both optional), which become Secret Manager secrets the
+# first time they're missing. Once they exist, any machine can deploy without
+# the .env.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -83,11 +85,16 @@ ensure_secret supabase-secret SUPABASE_SECRET_KEY ||
 # Wikipedia fallback carries on. Pexels wasn't issuing keys when this was written.
 ensure_secret pexels-key PEXELS_KEY ||
   echo "No Pexels key: deploying without photo search."
+# Optional too: without it /recipe is a 503, which the app reads as "not
+# available here", and pasting a recipe works as it always has.
+ensure_secret anthropic-key ANTHROPIC_API_KEY ||
+  echo "No Anthropic key: deploying without recipe writing."
 
 step "Deploying $SERVICE"
-# --max-instances also caps the per-instance photo rate limit's multiplier;
-# see server/app/main.py.
-gcloud run deploy "$SERVICE" --source server --project "$PROJECT" \
+# --max-instances also caps the per-instance rate limits' multiplier; see
+# server/app/main.py. The source is the repo root, trimmed by .gcloudignore, so
+# the image can carry assets/ — see Dockerfile.
+gcloud run deploy "$SERVICE" --source . --project "$PROJECT" \
   --region "$REGION" --allow-unauthenticated --max-instances 2 \
   --set-env-vars "SUPABASE_URL=$SUPABASE_URL" \
   --set-secrets "$(IFS=,; echo "${secrets[*]}")" \

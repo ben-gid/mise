@@ -4,10 +4,13 @@ version = "0.1.0"
 description = "Holds the Pexels key so the mise app doesn't have to."
 requires-python = ">=3.13"
 dependencies = [
+    "anthropic>=2.3.0",
     "fastapi>=0.159.1",
     "httpx>=0.28.1",
+    "jsonschema>=4.26.0",
     "pydantic-settings>=2.16.1",
     "pyjwt[crypto]>=2.15.1",
+    "rfc3339-validator>=0.1.4",
     "uvicorn>=0.54.0",
 ]
 

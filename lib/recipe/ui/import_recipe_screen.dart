@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../recipe_models.dart';
 import '../recipe_parser.dart';
+import '../recipe_server.dart';
 import '../recipe_store.dart';
 import 'glass.dart';
 
@@ -27,10 +31,82 @@ class _ImportRecipeScreenState extends State<ImportRecipeScreen> {
   final _controller = TextEditingController();
   List<String> _errors = const [];
 
+  /// A dish, an idea or a link, for the server to write up.
+  final _ask = TextEditingController();
+  List<String> _askErrors = const [];
+
   @override
   void dispose() {
     _controller.dispose();
+    _ask.dispose();
     super.dispose();
+  }
+
+  /// One box for a sentence and a link: a link is the whole box and nothing
+  /// else, which no description of a dish ever is.
+  Future<void> _write() async {
+    final text = _ask.text.trim();
+    if (text.isEmpty) return;
+    final link = Uri.tryParse(text);
+    final isLink =
+        !text.contains(' ') &&
+        link != null &&
+        (link.isScheme('https') || link.isScheme('http')) &&
+        link.host.isNotEmpty;
+    await _fromServer(
+      isLink ? 'Reading the page…' : 'Writing the recipe…',
+      () => isLink ? askForRecipe(url: text) : askForRecipe(text: text),
+    );
+  }
+
+  Future<void> _fromPhoto() async {
+    final XFile? picked;
+    try {
+      // Shrunk the way the editor's picker shrinks: a cookbook page reads fine
+      // at 1600px, and it is uploaded whole.
+      picked = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1600,
+        imageQuality: 85,
+      );
+    } on MissingPluginException {
+      _say('Choosing a photo needs a phone or tablet.');
+      return;
+    }
+    if (picked == null) return;
+    final bytes = await picked.readAsBytes();
+    await _fromServer(
+      'Reading the photo…',
+      () => askForRecipe(image: (photoType(picked!.name), bytes)),
+    );
+  }
+
+  /// Runs [ask] behind [whileWriting], then treats what comes back like any
+  /// paste: parsed by the phone's own validator before it is saved.
+  Future<void> _fromServer(
+    String message,
+    Future<String> Function() ask,
+  ) async {
+    setState(() => _askErrors = const []);
+    final Recipe recipe;
+    try {
+      recipe = widget.parser.parse(await whileWriting(context, message, ask));
+    } on RecipeValidationException catch (e) {
+      if (mounted) setState(() => _askErrors = e.errors);
+      return;
+    } on ServerRecipeException catch (e) {
+      _say(e.message);
+      return;
+    }
+    final id = await widget.store.save(recipe);
+    if (mounted) Navigator.pop(context, (id, recipe));
+  }
+
+  void _say(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _import() async {
@@ -77,6 +153,47 @@ class _ImportRecipeScreenState extends State<ImportRecipeScreen> {
         child: const Text('Import'),
       ),
       children: [
+        if (serverRecipesOn) ...[
+          Text('Have mise write it', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 4),
+          Text(
+            'Describe a dish, paste a recipe link, or pick a photo of a '
+            'cookbook page.',
+            style: muted,
+          ),
+          if (_askErrors.isNotEmpty)
+            ErrorList(
+              errors: _askErrors,
+              tip: 'Try again, or say it a different way.',
+            ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _ask,
+            textInputAction: TextInputAction.go,
+            onSubmitted: (_) => _write(),
+            decoration: const InputDecoration(
+              hintText: 'Lemon drizzle cake for eight',
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              FilledButton.tonal(
+                onPressed: _write,
+                child: const Text('Write it'),
+              ),
+              const SizedBox(width: 10),
+              OutlinedButton.icon(
+                onPressed: _fromPhoto,
+                icon: const Icon(Icons.photo_outlined, size: 18),
+                label: const Text('From a photo'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 28),
+          Text('Or bring your own', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 16),
+        ],
         _Step(
           number: 1,
           title: 'Copy the prompt',
@@ -268,46 +385,49 @@ class ErrorList extends StatelessWidget {
   }
 }
 
-/// Built from the live schema so it can't drift from what the validator
-/// actually enforces.
+/// Holds the screen behind a progress dialog while [work] runs. Blocking on
+/// purpose: a server recipe takes seconds, and nothing on the screen behind it
+/// means anything until it lands. The bar animates forever, so it is only ever
+/// up while a real request is out — never in a test, where the server is off.
+Future<T> whileWriting<T>(
+  BuildContext context,
+  String message,
+  Future<T> Function() work,
+) async {
+  final navigator = Navigator.of(context, rootNavigator: true);
+  unawaited(
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => PopScope(
+        canPop: false,
+        child: AlertDialog(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(message),
+              const SizedBox(height: 16),
+              const LinearProgressIndicator(),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+  try {
+    return await work();
+  } finally {
+    navigator.pop();
+  }
+}
+
+/// The shared prompt, plus what only a copy-and-paste needs: where the JSON
+/// goes and how it gets back into the app.
 String _prompt(RecipeParser parser) =>
-    'Write a recipe as JSON for the mise recipe app.\n\n'
+    '${parser.prompt}\n'
     'Put the whole JSON in one ```json code block, and put nothing else in '
     'that block — no comments, no notes, no text before or after the object. '
-    'Anything you want to tell me about the recipe goes outside the block.\n\n'
+    'Anything you want to tell me about the recipe goes outside the block. '
     'I will copy that block and paste it into mise: open the app, tap '
-    'Import recipe, tap Paste, then tap Import. The app checks it against '
-    'this JSON Schema before saving, so it has to match exactly:\n\n'
-    '${parser.schemaJson}\n\n'
-    'Rules:\n'
-    '- Ingredient ids are 4 digits ("0001", "0002", …).\n'
-    '- Fold counting nouns into the ingredient name for whole items '
-    '("garlic cloves") and set their unit to null.\n'
-    '- Give each ingredient a name distinct from the others. Where the same '
-    'thing appears in two components, say which: "caster sugar (sponge)" '
-    'and "caster sugar (buttercream)", not "caster sugar" twice.\n'
-    '- Step content references ingredients inline as {0001} — never repeat the '
-    'amount in the text.\n'
-    '- Set timer_seconds whenever a step involves waiting: proofing, baking, '
-    'resting, chilling, simmering — and for timed cooking on the stove, like '
-    'browning mushrooms for six minutes or reducing wine for two. Not for '
-    'hands-on work like whisking, creaming or kneading.\n'
-    '- Set density_g_per_ml on every ingredient that could reasonably be '
-    'measured either way, so the reader can switch between weight and volume. '
-    'Omit it only for countable items and pinches.\n'
-    '- Set image_query to two to four words for what the finished dish looks '
-    'like, the way you would type it into a stock photo search: "rustic '
-    'focaccia bread", "creamy mushroom pasta". Describe the food, not the '
-    'recipe — not its title, not a cuisine or a person\'s name, nothing a '
-    'camera cannot see. A dish\'s common name is fine where a photographer '
-    'would tag the photo with it: "victoria sponge cake", "pad thai". The app '
-    'searches a photo library with it.\n'
-    '- Leave image_urls out entirely. The app fills it in when the cook picks '
-    'a photo, and a url from you would override that pick with a link that is '
-    'usually dead.\n'
-    '- Write notes last, once the rest of the recipe is on the page: it is '
-    'the headnote the app prints above the ingredients, so it wants what a '
-    'cookbook puts there — where the dish comes from, when to make it, what '
-    'can be substituted, the tip that decides whether it works. Prose, not a '
-    'recap of the steps.\n'
-    '- created_at is the current time in ISO 8601.';
+    'Import recipe, tap Paste, then tap Import.';

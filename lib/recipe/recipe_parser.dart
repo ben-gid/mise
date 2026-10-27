@@ -6,6 +6,7 @@ import 'package:json_schema/json_schema.dart';
 import 'recipe_models.dart';
 
 const recipeSchemaAsset = 'assets/schemas/recipe_schema.json';
+const recipePromptAsset = 'assets/prompts/recipe.md';
 
 /// Thrown when incoming JSON is malformed or fails schema validation.
 /// [errors] lists every failing field/constraint, not just the first.
@@ -26,10 +27,22 @@ class RecipeParser {
   final String schemaJson;
   final JsonSchema _schema;
 
-  RecipeParser(this.schemaJson) : _schema = JsonSchema.create(schemaJson);
+  /// [recipePromptAsset] as read, `{schema}` and all. Empty where nothing
+  /// loaded it, which is every test that builds a parser from the schema alone.
+  final String promptTemplate;
 
-  static Future<RecipeParser> fromAsset() async =>
-      RecipeParser(await rootBundle.loadString(recipeSchemaAsset));
+  RecipeParser(this.schemaJson, {this.promptTemplate = ''})
+    : _schema = JsonSchema.create(schemaJson);
+
+  static Future<RecipeParser> fromAsset() async => RecipeParser(
+    await rootBundle.loadString(recipeSchemaAsset),
+    promptTemplate: await rootBundle.loadString(recipePromptAsset),
+  );
+
+  /// The rules every recipe is written to, with the live schema in them. The
+  /// server sends the same file to its model, so a Copy button and Pro can't
+  /// disagree about what a recipe is.
+  String get prompt => promptTemplate.replaceFirst('{schema}', schemaJson);
 
   /// Throws [RecipeValidationException] on bad input; never throws on a
   /// well-formed-but-invalid document.

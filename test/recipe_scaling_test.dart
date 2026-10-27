@@ -8,7 +8,7 @@ import 'package:mise/recipe/recipe_scaling.dart';
 void main() {
   final parser = RecipeParser(File(recipeSchemaAsset).readAsStringSync());
   final recipe = parser.parse(
-    File('test/fixtures/valid_recipe.json').readAsStringSync(),
+    File('test/fixtures/valid/focaccia.json').readAsStringSync(),
   );
 
   test('formats amounts without trailing noise', () {

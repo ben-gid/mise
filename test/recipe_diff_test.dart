@@ -8,7 +8,7 @@ import 'package:mise/recipe/recipe_models.dart';
 /// Pure functions over two [Recipe]s — no store, no widgets, so this is a plain
 /// `test()` file with none of the fake-async constraints widget_test.dart has.
 void main() {
-  final validJson = File('test/fixtures/valid_recipe.json').readAsStringSync();
+  final validJson = File('test/fixtures/valid/focaccia.json').readAsStringSync();
   const headnote =
       'A slow-proofed focaccia with a garlic butter crust. The long cold '
       'rest is what gives it the open crumb \u2014 the dough can sit '

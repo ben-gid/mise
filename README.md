@@ -22,7 +22,7 @@ flutter analyze
 - The import screen's "Copy prompt" button embeds that schema, so an LLM emits exactly what the validator accepts.
 
 Changing the recipe shape means editing the schema, `recipe_models.dart`, and
-`test/fixtures/valid_recipe.json` together, then `dart run build_runner build`.
+`test/fixtures/valid/focaccia.json` together, then `dart run build_runner build`.
 See [CLAUDE.md](CLAUDE.md) for the rest.
 
 ## Roadmap
@@ -69,16 +69,20 @@ Two-way, for signed-in users only, free. Local files stay the source of truth.
 
 ### Phase 4 — Recipes from the server
 
-Three routes on the existing FastAPI service, all on Claude Haiku 5.5.
+One `POST /recipe` on the existing FastAPI service, on Claude Haiku 5.5.
 
-- [ ] `/generate` from a sentence, `/adapt` an existing recipe (saved as a new version, so
-      the diff shows what changed), `/import` from a URL or a cookbook photo
-- [ ] Server built from the repo root, reading the live schema and one shared prompt file
-- [ ] Pydantic validation plus the `{id}` reference check, at most two retries with the
-      errors sent back; the phone still validates everything it receives
-- [ ] Shared valid/invalid fixtures that `flutter test` and `pytest` must agree on
-- [ ] Usage table recording each call's cost; three free tries per account
-- [ ] Haiku checked against real URLs and cookbook photos before `/import` ships
+- [x] Write from a sentence, adapt an existing recipe (saved as a new version, so the
+      diff shows what changed), import from a URL or a cookbook photo — all one route
+- [x] URLs read their schema.org Recipe data first, the page's text otherwise
+- [x] Server built from the repo root, reading the live schema and one shared prompt file
+      that both Copy buttons use too
+- [x] `jsonschema` on the live schema plus the `{id}` reference check, at most two
+      retries with the errors sent back; the phone still validates everything it receives
+- [x] Shared valid/invalid fixtures that `flutter test` and `pytest` must agree on
+- [x] Usage table recording each call's cost; five free tries per account, anonymous
+      ones included, spent only by a recipe that passes
+- [ ] Haiku checked against real URLs and cookbook photos (`server/eval/`) before
+      `/import` ships
 
 ### Phase 5 — Payments
 

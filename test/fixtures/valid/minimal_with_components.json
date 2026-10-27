@@ -1,0 +1,95 @@
+{
+  "title": "Garlic Butter Focaccia",
+  "base_servings": 4,
+  "ingredients": [
+    {
+      "id": "0001",
+      "name": "bread flour",
+      "amount": 500,
+      "unit": "g",
+      "density_g_per_ml": 0.53
+    },
+    {
+      "id": "0002",
+      "name": "water",
+      "amount": 400,
+      "unit": "ml",
+      "density_g_per_ml": 1.0
+    },
+    {
+      "id": "0003",
+      "name": "fine sea salt",
+      "amount": 10,
+      "unit": "g",
+      "density_g_per_ml": 1.2
+    },
+    {
+      "id": "0004",
+      "name": "instant yeast",
+      "amount": 1,
+      "unit": "tsp"
+    },
+    {
+      "id": "0005",
+      "name": "garlic cloves",
+      "amount": 4,
+      "unit": null
+    },
+    {
+      "id": "0006",
+      "name": "butter (dough)",
+      "amount": 60,
+      "unit": "g",
+      "density_g_per_ml": 0.91
+    },
+    {
+      "id": "0007",
+      "name": "flaky salt",
+      "amount": 1,
+      "unit": "pinch"
+    },
+    {
+      "id": "0008",
+      "name": "butter (topping)",
+      "amount": 20,
+      "unit": "g",
+      "density_g_per_ml": 0.91
+    }
+  ],
+  "steps": [
+    {
+      "id": "s1",
+      "title": "Mix the dough",
+      "content": "Whisk {0001}, {0003} and {0004}, then pour in {0002} and mix to a shaggy dough.",
+      "timer_seconds": null
+    },
+    {
+      "id": "s2",
+      "title": "Bulk proof",
+      "content": "Cover and leave at room temperature until doubled.",
+      "timer_seconds": 7200
+    },
+    {
+      "id": "s3",
+      "title": "Make the garlic butter",
+      "content": "Melt {0006} with finely sliced {0005} over low heat.",
+      "timer_seconds": 300
+    },
+    {
+      "id": "s4",
+      "title": "Bake",
+      "content": "Dimple the dough, dot with {0008}, scatter {0007} and bake at 220C.",
+      "timer_seconds": 1500
+    }
+  ],
+  "image_urls": [
+    "mise://1755080640000.jpg"
+  ],
+  "tags": [
+    "bread",
+    "vegetarian",
+    "make-ahead"
+  ],
+  "source": "claude-generated",
+  "created_at": "2026-08-13T10:24:00Z"
+}

@@ -20,7 +20,7 @@ import 'package:mise/recipe/ui/settings_screen.dart';
 /// these tests cover the wiring.
 void main() {
   final parser = RecipeParser(File(recipeSchemaAsset).readAsStringSync());
-  final validJson = File('test/fixtures/valid_recipe.json').readAsStringSync();
+  final validJson = File('test/fixtures/valid/focaccia.json').readAsStringSync();
 
   late Directory dir;
   late RecipeStore store;

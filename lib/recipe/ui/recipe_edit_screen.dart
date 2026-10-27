@@ -297,31 +297,12 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
     await Clipboard.setData(
       ClipboardData(
         text:
-            'Rewrite this recipe as JSON for the mise recipe app.\n\n'
-            'Put the whole JSON in one ```json code block, and put nothing '
-            'else in that block — no comments, no notes. Anything you want to '
-            'tell me goes outside the block. I will copy that block and paste '
-            'it back into the recipe editor, which checks it against this '
-            'JSON Schema before saving:\n\n'
-            '${widget.parser.schemaJson}\n\n'
-            'Rules:\n'
-            '- Keep an ingredient id unchanged when the ingredient itself is '
-            'unchanged.\n'
-            '- Give each ingredient a name distinct from the others. Where '
-            'the same thing appears in two components, say which: "caster '
-            'sugar (sponge)" and "caster sugar (buttercream)", not "caster '
-            'sugar" twice.\n'
-            '- Step content references ingredients inline as {0001} — never '
-            'repeat the amount in the text.\n'
-            '- Set timer_seconds whenever a step involves waiting.\n'
-            '- Set density_g_per_ml on every ingredient that could reasonably '
-            'be measured either way, keeping any already there. Omit it only '
-            'for countable items and pinches.\n'
-            '- Leave image_urls exactly as it is. It holds the photo the '
-            'cook chose and is not yours to change.\n'
-            '- Set image_query if it is missing, and fix it if it names the '
-            'recipe instead of describing it: two to four words for what the '
-            'finished dish looks like, as typed into a stock photo search.\n\n'
+            '${widget.parser.prompt}\n'
+            'Rewrite the recipe below. Put the whole JSON in one ```json code '
+            'block, and put nothing else in that block — no comments, no '
+            'notes. Anything you want to tell me goes outside the block. I '
+            'will copy that block and paste it back into the recipe '
+            'editor.\n\n'
             'The recipe to rewrite:\n${_json.text}',
       ),
     );

@@ -139,7 +139,7 @@ void main() {
     final parser = RecipeParser(File(recipeSchemaAsset).readAsStringSync());
 
     final json =
-        jsonDecode(File('test/fixtures/valid_recipe.json').readAsStringSync())
+        jsonDecode(File('test/fixtures/valid/focaccia.json').readAsStringSync())
             as Map<String, dynamic>;
     json['ingredients'] = [
       {'id': '0001', 'name': 'milk', 'amount': 2, 'unit': 'cup'},

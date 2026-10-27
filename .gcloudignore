@@ -1,0 +1,13 @@
+# Uploaded to Cloud Build from the repo root: only what the Dockerfile copies.
+/*
+!/Dockerfile
+!/server/
+!/assets/
+/assets/*
+!/assets/schemas/
+!/assets/prompts/
+.venv/
+.env
+__pycache__/
+.pytest_cache/
+/server/tests/
