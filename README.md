@@ -91,20 +91,21 @@ One `POST /recipe` on the existing FastAPI service, on Claude Haiku 5.5.
 
 Mise Pro: $4.99 a month or $49.99 a year, one `pro` entitlement in RevenueCat.
 
-- [X] RevenueCat subscription with the Supabase user id as its app user id
-- [X] The server asks RevenueCat when the free tries are gone and keeps the expiry in
-  `pro_until`, rather than running a webhook
-- [X] Paywall when the free tries run out, which retries the recipe after a purchase;
-  Restore purchases; a Mise Pro panel in Settings
-- [X] Pro is capped at 200 recipes a month, about $1 of model time
-- [X] RevenueCat project `mise`: iOS and Android apps, `pro` entitlement, default
-  offering with Monthly and Yearly packages
-- [ ] Subscriptions in App Store Connect (`mise_pro_monthly`, `mise_pro_annual`, one
-  group) and the Play Console (`mise_pro` with `monthly` and `annual` base plans)
-- [ ] Store credentials in RevenueCat: the In-App Purchase key on iOS, a service
-  account on Play
-- [ ] RevenueCat's v1 secret key in `server/.env` as `REVENUECAT_SECRET_KEY`, then
-  `scripts/deploy.sh`
+- [x] RevenueCat subscription with the Supabase user id as its app user id
+- [x] The server asks RevenueCat when the free tries are gone and keeps the expiry in
+      `pro_until`, rather than running a webhook
+- [x] Paywall when the free tries run out, which retries the recipe after a purchase;
+      Restore purchases; a Mise Pro panel in Settings
+- [x] Pro is capped at 200 recipes a month, about $1 of model time
+- [x] RevenueCat project `mise`: iOS and Android apps, `pro` entitlement, default
+      offering with Monthly and Yearly packages
+- [x] Subscriptions in App Store Connect (`mise_pro_monthly`, `mise_pro_annual`, one
+      group)
+- [ ] Subscriptions in the Play Console (`mise_pro` with `monthly` and `annual` base plans)
+- [x] The In-App Purchase key in RevenueCat for iOS
+- [ ] A Play service account in RevenueCat for Android
+- [x] RevenueCat's v1 secret key in `server/.env` as `REVENUECAT_SECRET_KEY`, then
+      `scripts/deploy.sh`
 - [ ] Terms and Privacy links on the paywall, which App Review requires for a subscription
 - [ ] The app built and run on a phone with `purchases_flutter` in it
 - [ ] A sandbox purchase, a Restore after reinstalling, and the 200 cap verified on
