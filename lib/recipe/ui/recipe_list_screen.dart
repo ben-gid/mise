@@ -170,7 +170,20 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
             // which hangs pumpAndSettle in widget tests.
             if (!snapshot.hasData) return const SizedBox.shrink();
             final library = snapshot.data!;
-            if (library.recipes.isEmpty) return const _EmptyState();
+            if (library.recipes.isEmpty) {
+              return SafeArea(
+                bottom: false,
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                      child: _header(context),
+                    ),
+                    const Expanded(child: _EmptyState()),
+                  ],
+                ),
+              );
+            }
             // Sync already runs on launch, resume and every save; this is for
             // the cook standing at a second phone who doesn't want to wait.
             return RefreshIndicator(
@@ -180,6 +193,31 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
           },
         ),
       ),
+    );
+  }
+
+  // Settings is the way in to sign-in and sync, so it shows on an empty
+  // library too — a second phone starts with nothing to list.
+  Widget _header(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Expanded(child: Text('Recipes', style: theme.textTheme.headlineLarge)),
+        IconButton.filledTonal(
+          icon: const Icon(Icons.tune),
+          tooltip: 'Settings',
+          style: IconButton.styleFrom(
+            backgroundColor: glassFill(context),
+            fixedSize: const Size(48, 48),
+          ),
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => SettingsScreen(store: widget.store),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -233,30 +271,7 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          'Recipes',
-                          style: theme.textTheme.headlineLarge,
-                        ),
-                      ),
-                      IconButton.filledTonal(
-                        icon: const Icon(Icons.tune),
-                        tooltip: 'Settings',
-                        style: IconButton.styleFrom(
-                          backgroundColor: glassFill(context),
-                          fixedSize: const Size(48, 48),
-                        ),
-                        onPressed: () => Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => SettingsScreen(store: widget.store),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                  _header(context),
                   const SizedBox(height: 14),
                   TextField(
                     onChanged: (value) =>

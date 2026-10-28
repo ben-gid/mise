@@ -121,6 +121,8 @@ void main() {
   testWidgets('shows the empty state with nothing saved', (tester) async {
     await pumpList(tester);
     expect(find.text('No recipes yet'), findsOneWidget);
+    // Settings holds sign-in, which a phone with nothing on it yet needs.
+    expect(find.byTooltip('Settings'), findsOneWidget);
   });
 
   testWidgets('lists saved recipes on launch', (tester) async {
