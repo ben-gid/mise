@@ -21,7 +21,7 @@ FREE_TRIES = 5
 
 # Recipes a Pro user may have written per calendar month (UTC). At what a
 # recipe costs on Haiku that is about a dollar, so it stops a script, not a cook.
-PRO_MONTHLY = 200
+PRO_MONTHLY = 201  # "200+ a month" on the paywall, and true
 # The entitlement both subscriptions unlock, as set up in RevenueCat.
 ENTITLEMENT = "pro"
 

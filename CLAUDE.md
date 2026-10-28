@@ -428,7 +428,7 @@ is what makes the server's question about the right customer. An anonymous
 user can buy. After a reinstall, Restore moves the receipt onto the new
 anonymous id, using RevenueCat's default transfer behaviour.
 
-Pro is capped at `PRO_MONTHLY` (200) successful recipes per UTC calendar month,
+Pro is capped at `PRO_MONTHLY` (201, so the paywall's "200+" is true) successful recipes per UTC calendar month,
 counted from `usage`. At Haiku prices that is about a dollar, so the cap stops
 scripts, not cooks. Over the cap is a 429 whose `detail` the phone shows as it
 is. The hourly limit's 429 is worded for the cook as well, because only the

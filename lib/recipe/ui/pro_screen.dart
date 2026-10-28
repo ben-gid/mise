@@ -102,7 +102,7 @@ class _ProScreenState extends State<ProScreen> {
       children: [
         Text(
           'Write a recipe from a sentence, change one you already have, or '
-          'bring one in from a link or a photo of a cookbook page — up to 200 '
+          'bring one in from a link or a photo of a cookbook page — 200+ '
           'a month. Pasting a recipe, photos, scaling and units stay free.',
           style: theme.textTheme.bodyLarge,
         ),
