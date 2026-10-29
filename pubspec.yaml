@@ -74,20 +74,12 @@ flutter_launcher_icons:
   android: true
   ios: true
   remove_alpha_ios: true
-  # Android shrinks the adaptive foreground ~72% and crops to a circle; the
-  # mark sits in the central 60%, so it clears the safe zone untouched.
-  adaptive_icon_background: "#0E0B10"
+  # The wordmark is drawn 52% wide on the adaptive layers, so its corners sit
+  # inside the 61% circle Android guarantees under every mask shape; the
+  # legacy and iOS icons draw it at 62%.
+  adaptive_icon_background: "#FFFFFF"
   adaptive_icon_foreground: "assets/icon/mise_icon_foreground_1024.png"
   adaptive_icon_monochrome: "assets/icon/mise_icon_monochrome_1024.png"
-  # The handoff reads Android's safe zone as a 66% *box* and concludes the mark,
-  # at a 60% bounding box, clears it. That holds for square and squircle masks
-  # but not for a circular one (Pixel's default): four circles in a quad have a
-  # circumscribed circle of 73.4% of the layer, so a circle mask shaves a flat
-  # chord off each bowl's outer corner — 8.4% of the mark. 9% brings the
-  # circumscribed circle to 60.2%, inside the 66dp/61.1% circle Google
-  # guarantees against every mask shape. This is the one place the icon departs
-  # from the handoff's geometry; iOS and the legacy Android icon keep it exactly.
-  adaptive_icon_foreground_inset: 9
   # ponytail: re-running this generator rewrites every line in project.pbxproj
   # containing "ASSETCATALOG", so it clobbers
   # ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS (a YES/NO flag)
@@ -97,15 +89,14 @@ flutter_launcher_icons:
   # here — the icons themselves are correct.
 
 flutter_native_splash:
-  # One colour for both themes: the ground is already near-black plum, so a
-  # light variant would be the only place in the app the mark sits on paper.
-  color: "#0E0B10"
+  # The icon's own white, so launch reads as the icon opening.
+  color: "#FFFFFF"
   image: "assets/icon/mise_icon_foreground_1024.png"
   android: true
   ios: true
   web: false
   android_12:
-    color: "#0E0B10"
+    color: "#FFFFFF"
     image: "assets/icon/mise_icon_foreground_1024.png"
 
 # For information on the generic Dart part of this file, see the

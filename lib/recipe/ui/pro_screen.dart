@@ -42,8 +42,32 @@ class ProScreen extends StatefulWidget {
 }
 
 class _ProScreenState extends State<ProScreen> {
-  late final Future<List<Package>> _packages = proPackages();
+  /// Null while the store answers; empty when it couldn't.
+  List<Package>? _packages;
+  Package? _picked;
   bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    proPackages().then(
+      (packages) {
+        if (!mounted) return;
+        setState(() {
+          _packages = packages;
+          _picked =
+              packages
+                  .where((p) => p.packageType == PackageType.annual)
+                  .firstOrNull ??
+              packages.firstOrNull;
+        });
+      },
+      onError: (Object e) {
+        debugPrint('Pro packages failed: $e');
+        if (mounted) setState(() => _packages = const []);
+      },
+    );
+  }
 
   Future<void> _run(Future<bool> Function() action, String failed) async {
     setState(() => _busy = true);
@@ -94,96 +118,232 @@ class _ProScreenState extends State<ProScreen> {
       color: scheme.onSurfaceVariant,
     );
     final until = proUntil.value;
+    final packages = _packages;
+    final picked = _picked;
     return SpreadPage(
       title: 'Mise Pro',
-      subtitle: until == null
-          ? 'Recipes written for you'
-          : 'Pro until ${formatDay(until)}',
+      subtitle: until == null ? null : 'Pro until ${formatDay(until)}',
+      bottom: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (until == null && picked != null)
+            FilledButton(
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(56),
+              ),
+              onPressed: _busy
+                  ? null
+                  : () => _run(
+                      () => buyPro(picked),
+                      'The purchase didn\'t go through.',
+                    ),
+              child: Text(
+                'Continue · ${picked.storeProduct.priceString} '
+                '${_term(picked).$3}',
+              ),
+            ),
+          TextButton(
+            onPressed: _busy
+                ? null
+                : () => _run(restorePro, 'Couldn\'t restore. Try again.'),
+            child: const Text('Restore purchases'),
+          ),
+          Text(
+            'Renews until you cancel, any time, in your '
+            '${theme.platform == TargetPlatform.iOS ? 'App Store' : 'Google Play'} '
+            'subscriptions.',
+            textAlign: TextAlign.center,
+            style: muted,
+          ),
+        ],
+      ),
       children: [
         Text(
-          'Write a recipe from a sentence, change one you already have, or '
-          'bring one in from a link or a photo of a cookbook page — 200+ '
-          'a month. Pasting a recipe, photos, scaling and units stay free.',
-          style: theme.textTheme.bodyLarge,
+          '200+ intelligent recipes, every month.',
+          style: serif(22, height: 1.15, italic: true),
         ),
-        const SizedBox(height: 24),
-        if (until == null)
-          FutureBuilder(
-            future: _packages,
-            builder: (context, snapshot) {
-              final packages = snapshot.data;
-              if (packages == null || packages.isEmpty) {
-                return Text(
-                  snapshot.connectionState == ConnectionState.done
-                      ? 'Couldn\'t reach the store. Try again in a moment.'
-                      : 'Loading prices…',
-                  style: theme.textTheme.bodyMedium,
-                );
-              }
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (final package in packages) ...[
-                    _Price(
-                      package: package,
-                      onTap: _busy
-                          ? null
-                          : () => _run(
-                              () => buyPro(package),
-                              'The purchase didn\'t go through.',
-                            ),
-                    ),
-                    const SizedBox(height: 10),
-                  ],
-                ],
-              );
-            },
-          ),
-        const SizedBox(height: 8),
-        TextButton(
-          onPressed: _busy
-              ? null
-              : () => _run(restorePro, 'Couldn\'t restore. Try again.'),
-          child: const Text('Restore purchases'),
+        const SizedBox(height: 20),
+        const Divider(),
+        const _Feature(
+          icon: Icons.auto_awesome_outlined,
+          title: 'Create',
+          body:
+              'Say what you want to eat. Mise asks a question or two, then '
+              'writes it.',
         ),
-        const SizedBox(height: 8),
-        Text(
-          'Renews until you cancel, which you can do any time in your '
-          '${Theme.of(context).platform == TargetPlatform.iOS ? 'App Store' : 'Google Play'} '
-          'subscriptions.',
-          textAlign: TextAlign.center,
-          style: muted,
+        const Divider(),
+        const _Feature(
+          icon: Icons.tune,
+          title: 'Adapt',
+          body:
+              'Halve the sugar, make it vegan. Every change is kept, and '
+              'undoable.',
         ),
+        const Divider(),
+        const _Feature(
+          icon: Icons.menu_book_outlined,
+          title: 'Import',
+          body: 'Paste a link, or photograph a cookbook page.',
+        ),
+        const Divider(),
+        const SizedBox(height: 10),
+        Text('Pasting, photos, scaling and units stay free.', style: muted),
+        if (until == null) ...[
+          const SizedBox(height: 24),
+          const SectionLabel('Choose a plan'),
+          const SizedBox(height: 10),
+          if (packages == null || packages.isEmpty)
+            Text(
+              packages == null
+                  ? 'Loading prices…'
+                  : 'Couldn\'t reach the store. Try again in a moment.',
+              style: theme.textTheme.bodyMedium,
+            )
+          else
+            for (final package in packages) ...[
+              _Plan(
+                package: package,
+                picked: package == picked,
+                onTap: _busy ? null : () => setState(() => _picked = package),
+              ),
+              const SizedBox(height: 10),
+            ],
+        ],
       ],
     );
   }
 }
 
-/// One subscription as a full-width button: the term, and the store's price
-/// in the cook's own currency.
-class _Price extends StatelessWidget {
-  final Package package;
-  final VoidCallback? onTap;
+/// A subscription's name, how it bills, and the "a year" after its price.
+(String, String, String) _term(Package package) =>
+    switch (package.packageType) {
+      PackageType.annual => ('Yearly', 'Billed once a year', 'a year'),
+      PackageType.monthly => ('Monthly', 'Billed every month', 'a month'),
+      _ => (package.storeProduct.title, '', ''),
+    };
 
-  const _Price({required this.package, required this.onTap});
+/// One thing Pro does: an icon on a herb tile, its name, a line under it.
+class _Feature extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String body;
+
+  const _Feature({required this.icon, required this.title, required this.body});
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final term = switch (package.packageType) {
-      PackageType.annual => ('Yearly', 'a year'),
-      PackageType.monthly => ('Monthly', 'a month'),
-      _ => (package.storeProduct.title, ''),
-    };
-    return FilledButton(
-      style: FilledButton.styleFrom(
-        minimumSize: const Size.fromHeight(56),
-        backgroundColor: scheme.onSurface,
-        foregroundColor: scheme.surface,
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: herbWash(context),
+              borderRadius: BorderRadius.circular(pillRadius),
+            ),
+            child: Icon(icon, size: 22, color: scheme.primary),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: theme.textTheme.titleMedium),
+                const SizedBox(height: 2),
+                Text(
+                  body,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
-      onPressed: onTap,
-      child: Text(
-        '${term.$1} · ${package.storeProduct.priceString} ${term.$2}'.trim(),
+    );
+  }
+}
+
+/// One subscription as a card to pick: the term, how it bills, and the
+/// store's price in the cook's own currency. The button under the page buys
+/// whichever is picked.
+class _Plan extends StatelessWidget {
+  final Package package;
+  final bool picked;
+  final VoidCallback? onTap;
+
+  const _Plan({
+    required this.package,
+    required this.picked,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final (name, billing, _) = _term(package);
+    return Semantics(
+      selected: picked,
+      inMutuallyExclusiveGroup: true,
+      child: Material(
+        color: picked ? herbWash(context) : glassFill(context),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(panelRadius),
+          side: BorderSide(
+            color: picked ? scheme.primary : Colors.transparent,
+            width: 2,
+          ),
+        ),
+        child: InkWell(
+          customBorder: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(panelRadius),
+          ),
+          onTap: onTap,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 72),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Row(
+                children: [
+                  Icon(
+                    picked
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked,
+                    color: picked ? scheme.primary : scheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(name, style: theme.textTheme.titleMedium),
+                        if (billing.isNotEmpty)
+                          Text(
+                            billing,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  Text(
+                    package.storeProduct.priceString,
+                    style: serif(26).copyWith(color: scheme.onSurface),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
