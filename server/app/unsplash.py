@@ -1,6 +1,7 @@
 """Unsplash search, with the key held here rather than compiled into the app."""
 
 import time
+from urllib.parse import parse_qs, urlparse
 
 import httpx
 
@@ -57,13 +58,22 @@ def _photo(result: dict) -> dict | None:
         # tile and the hero then share one cache entry on the phone. Kept
         # whole: Unsplash wants its ixid query parameter left on.
         "url": url,
-        # For [downloaded], which Unsplash asks for when a photo is kept.
+        # For [downloaded], which Unsplash asks for when a photo is kept: the
+        # id and the ixid off its download_location, which Unsplash wants sent
+        # back. Not the location itself, so the phone never names a url the
+        # server will call with its key.
         "id": result["id"],
+        "ixid": _ixid(result),
         # The credit, as Unsplash wants it: the photographer by name, linking
         # to their profile. The phone shows it and never builds the link.
         "name": user["name"],
         "link": f"https://unsplash.com/@{user['username']}?{_REFERRAL}",
     }
+
+
+def _ixid(result: dict) -> str:
+    location = (result.get("links") or {}).get("download_location") or ""
+    return parse_qs(urlparse(location).query).get("ixid", [""])[0]
 
 
 async def search(query: str) -> list[dict]:
@@ -93,9 +103,13 @@ async def search(query: str) -> list[dict]:
     return photos
 
 
-async def downloaded(photo_id: str) -> None:
+async def downloaded(photo_id: str, ixid: str) -> None:
     """Tells Unsplash a photo was kept — its guidelines' "download", which is
     what credits the photographer. Not called for merely showing one."""
-    response = await _client.get(f"/photos/{photo_id}/download", headers=_headers())
+    response = await _client.get(
+        f"/photos/{photo_id}/download",
+        params={"ixid": ixid} if ixid else None,
+        headers=_headers(),
+    )
     if response.status_code != httpx.codes.OK:
         raise UnsplashError(response.status_code)

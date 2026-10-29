@@ -856,9 +856,9 @@ class _Credit extends StatelessWidget {
   }
 }
 
-/// "Photo by Jane Doe on Unsplash", the way Unsplash's terms ask for it: the
-/// photographer and Unsplash each a link. Two buttons rather than one line
-/// with tap spans, so each gets a finger-sized target on a phone.
+/// "Photo by Jane Doe on Unsplash", word for word what Unsplash's guidelines
+/// recommend: the photographer and Unsplash each a link. Two buttons rather
+/// than one line with tap spans, so each gets a finger-sized target on a phone.
 class _PhotographerCredit extends StatelessWidget {
   final ImageCredit credit;
 
@@ -887,7 +887,8 @@ class _PhotographerCredit extends StatelessWidget {
       children: [
         const SizedBox(width: 12),
         Icon(Icons.photo_camera_outlined, size: 13, color: ink),
-        const SizedBox(width: 2),
+        const SizedBox(width: 6),
+        Text('Photo by', style: style),
         Flexible(child: link(credit.name, credit.url)),
         Text('on', style: style),
         link('Unsplash', _unsplashHome),
@@ -1853,14 +1854,40 @@ class _PhotoSheet extends StatelessWidget {
                         borderRadius: BorderRadius.circular(12),
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(12),
-                          child: Image(
-                            // Through the chokepoint, so a tile and the hero
-                            // can never disagree about what a url paints as.
-                            image: imageFor(photo.url, store)!,
-                            fit: BoxFit.cover,
-                            // No loadingBuilder — see the class docs.
-                            errorBuilder: (_, _, _) =>
-                                ColoredBox(color: glassFill(context)),
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              Image(
+                                // Through the chokepoint, so a tile and the
+                                // hero can never disagree about what a url
+                                // paints as.
+                                image: imageFor(photo.url, store)!,
+                                fit: BoxFit.cover,
+                                // No loadingBuilder — see the class docs.
+                                errorBuilder: (_, _, _) =>
+                                    ColoredBox(color: glassFill(context)),
+                              ),
+                              // Unsplash asks for the photographer wherever
+                              // a photo is shown, the grid included. Text,
+                              // not a link: a tap on a tile picks it, and the
+                              // hero carries the link once it is picked.
+                              const DecoratedBox(
+                                decoration: BoxDecoration(gradient: heroScrim),
+                              ),
+                              Positioned(
+                                left: 8,
+                                right: 8,
+                                bottom: 6,
+                                child: Text(
+                                  photo.credit.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),

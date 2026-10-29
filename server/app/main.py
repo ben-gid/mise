@@ -72,6 +72,7 @@ class PhotoUsed(BaseModel):
     # An Unsplash photo id, never a url: the server builds the one url it calls
     # with its key, so this can't be pointed anywhere else.
     id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    ixid: str = Field("", pattern=r"^[A-Za-z0-9_-]{0,512}$")
 
 
 @app.post("/photos/used", status_code=204, tags=["photos"])
@@ -83,7 +84,7 @@ async def photo_used(body: PhotoUsed, request: Request) -> Response:
     if not _allow(_windows, _caller(request), LIMIT):
         raise HTTPException(status_code=429, detail="Too many photo searches")
     try:
-        await unsplash.downloaded(body.id)
+        await unsplash.downloaded(body.id, body.ixid)
     except (unsplash.UnsplashError, httpx.HTTPError):
         raise HTTPException(status_code=502, detail="Unsplash didn't answer")
     return Response(status_code=204)

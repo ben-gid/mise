@@ -599,14 +599,48 @@ class _CoverState extends State<_Cover> {
       // spinner per tile would be dozens of indefinite animations (CLAUDE.md).
       child: image == null
           ? initial
-          : Image(
-              image: image,
-              width: double.infinity,
-              height: double.infinity,
-              fit: BoxFit.cover,
-              errorBuilder: (context, _, _) => initial,
+          : Stack(
+              fit: StackFit.expand,
+              children: [
+                Image(
+                  image: image,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, _, _) => initial,
+                ),
+                // Unsplash asks for the photographer wherever a photo is shown.
+                // Text only: a tap opens the recipe, whose hero has the links.
+                if (_photographer() case final name?) ...[
+                  const DecoratedBox(
+                    decoration: BoxDecoration(gradient: heroScrim),
+                  ),
+                  Positioned(
+                    left: 10,
+                    right: 10,
+                    bottom: 8,
+                    child: Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                        color: Colors.white.withValues(alpha: 0.85),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
     );
+  }
+
+  /// Who took the photo on this tile: the recipe's own credit while its kept
+  /// photo is the one showing, or a search result's before it has been kept.
+  String? _photographer() {
+    final winner = _chain?.winner;
+    if (winner == null) return null;
+    if (winner == widget.recipe.imageUrls.firstOrNull) {
+      return widget.recipe.imageCredit?.name;
+    }
+    return _chain?.winnerFromSearch?.credit.name;
   }
 }
 

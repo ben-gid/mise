@@ -173,8 +173,12 @@ tell. It was Pexels until Pexels stopped issuing keys; recipes still carry Pexel
 and `creditFor` still names them.
 
 `image_credit` (`{name, url}`, optional) is the photographer of the photo in
-`image_urls`, because Unsplash's terms ask for the name, linked, wherever a photo is
-shown. A schema field and not a sidecar because it has to travel with the photo through
+`image_urls`, because Unsplash's API guidelines ask for the name, linked, wherever a
+photo is shown — and the production rate limit is granted on screenshots proving it.
+So every surface that paints an Unsplash photo names its photographer: the hero
+("Photo by *name* on *Unsplash*", both links), each picker tile and each list card
+(name only; a tap there picks or opens, and the hero carries the links). A new place
+that shows a stock photo needs the same, or the app is out of compliance. A schema field and not a sidecar because it has to travel with the photo through
 sync, history and Undo for free. App-owned like `image_urls`, and the two move together:
 `_setPhoto` writes both, the editor's `_draft()` keeps the credit only while the urls
 are unchanged, and `/recipe` copies both off the base recipe. The hero shows "Photo by
@@ -183,7 +187,8 @@ falls back to `creditFor`'s host. The server builds the profile link, referral
 parameters included, so the phone never knows Unsplash's url shapes. Keeping a search
 result — automatically or from the picker — also fires `keptStockPhoto`, Unsplash's
 required "download" ping (`POST /photos/used`), never awaited. The server takes a photo
-id there, never a url, because it attaches the key to whatever it calls.
+id and the `ixid` off its `download_location` (Unsplash wants it sent back), never a
+url, because it attaches the key to whatever it calls.
 
 `image_urls` is **app-owned**: the one photo the cook picked, or a `mise://<filename>`
 copied in beside the recipes by `RecipeStore.addImage`. The prompt tells the model to

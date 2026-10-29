@@ -21,7 +21,12 @@ def upstream(monkeypatch):
         user = {"name": "Jane Doe", "username": "janedoe"}
         body = {
             "results": [
-                {"id": "a1", "urls": {"regular": "https://images.unsplash.com/1"}, "user": user},
+                {
+                    "id": "a1",
+                    "urls": {"regular": "https://images.unsplash.com/1"},
+                    "user": user,
+                    "links": {"download_location": "https://api.unsplash.com/photos/a1/download?ixid=M3wx"},
+                },
                 # No credit to give is no photo to show: Unsplash's terms ask for one.
                 {"id": "b2", "urls": {"regular": "https://images.unsplash.com/x"}, "user": {}},
                 {"id": "c3", "urls": {}, "user": user},
@@ -47,22 +52,27 @@ def test_returns_credited_photos_and_sends_the_key(upstream):
     assert response.status_code == 200
     link = "https://unsplash.com/@janedoe?utm_source=mise&utm_medium=referral"
     assert response.json() == [
-        {"url": "https://images.unsplash.com/1", "id": "a1", "name": "Jane Doe", "link": link},
-        {"url": "https://images.unsplash.com/2", "id": "d4", "name": "Jane Doe", "link": link},
+        {"url": "https://images.unsplash.com/1", "id": "a1", "ixid": "M3wx", "name": "Jane Doe", "link": link},
+        {"url": "https://images.unsplash.com/2", "id": "d4", "ixid": "", "name": "Jane Doe", "link": link},
     ]
     assert upstream.requests[0].headers["Authorization"] == "Client-ID test-key"
     assert upstream.requests[0].url.params["query"] == "creamy mushroom pasta"
 
 
 def test_a_kept_photo_is_reported_to_unsplash(upstream):
-    assert client.post("/photos/used", json={"id": "a1"}).status_code == 204
+    response = client.post("/photos/used", json={"id": "a1", "ixid": "M3wx"})
+    assert response.status_code == 204
+    # The ixid goes back too: Unsplash's guidelines ask for download_location
+    # with its query parameters.
     assert upstream.requests[0].url.path == "/photos/a1/download"
+    assert upstream.requests[0].url.params["ixid"] == "M3wx"
     assert upstream.requests[0].headers["Authorization"] == "Client-ID test-key"
 
 
 def test_a_used_photo_id_cannot_steer_the_request(upstream):
     # The key goes on whatever url this builds, so an id can't be a path.
     assert client.post("/photos/used", json={"id": "../me"}).status_code == 422
+    assert client.post("/photos/used", json={"id": "a1", "ixid": "x&client_id=y"}).status_code == 422
     assert upstream.requests == []
 
 

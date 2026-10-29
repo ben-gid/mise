@@ -88,11 +88,18 @@ String? creditFor(String? url) {
 class StockPhoto {
   final String url;
 
-  /// Unsplash's id for it, for [keptStockPhoto].
+  /// Unsplash's id for it and the ixid off its download location, both for
+  /// [keptStockPhoto].
   final String id;
+  final String ixid;
   final ImageCredit credit;
 
-  const StockPhoto({required this.url, required this.id, required this.credit});
+  const StockPhoto({
+    required this.url,
+    required this.id,
+    this.ixid = '',
+    required this.credit,
+  });
 }
 
 /// Stock photographs of what the dish looks like, best first.
@@ -165,6 +172,7 @@ Future<List<StockPhoto>> _fetchStock(String query) async {
           StockPhoto(
             url: url,
             id: id,
+            ixid: photo['ixid'] is String ? photo['ixid'] as String : '',
             credit: ImageCredit(name: name, url: link),
           ),
     ];
@@ -191,7 +199,7 @@ Future<void> keptStockPhoto(StockPhoto photo) async {
       Uri.parse(_photoProxy).resolve('photos/used'),
     );
     request.headers.contentType = ContentType.json;
-    request.write(jsonEncode({'id': photo.id}));
+    request.write(jsonEncode({'id': photo.id, 'ixid': photo.ixid}));
     await (await request.close()).drain<void>();
   } catch (_) {
     // See above.
