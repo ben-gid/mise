@@ -384,12 +384,23 @@ class SpreadPage extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
             children: [
-              const Align(
-                alignment: Alignment.centerLeft,
-                child: RoundBackButton(),
+              // Beside the title rather than above it, which buys a row of
+              // content. Top-aligned, so a title that wraps keeps the button
+              // on its first line instead of floating between two.
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const RoundBackButton(),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Padding(
+                      // Centres the first line on the 48px button.
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(title, style: theme.textTheme.headlineLarge),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 14),
-              Text(title, style: theme.textTheme.headlineLarge),
               if (subtitle case final subtitle?) ...[
                 const SizedBox(height: 8),
                 Text(
