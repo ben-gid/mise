@@ -63,7 +63,8 @@ def problems(recipe: Any) -> list[str]:
 
 def _model_schema() -> dict:
     """The schema as structured outputs takes it: `$defs` for `definitions`,
-    `anyOf` for a list of types, and no `image_urls`, which is ours to fill.
+    `anyOf` for a list of types, and no `image_urls` or `image_credit`, which
+    are ours to fill.
     transform_schema then moves what constrained decoding can't enforce
     (lengths, ranges) into descriptions; [problems] still enforces them."""
     schema = copy.deepcopy(SCHEMA)
@@ -71,6 +72,7 @@ def _model_schema() -> dict:
     schema.pop("$id", None)
     schema["$defs"] = schema.pop("definitions")
     schema["properties"].pop("image_urls")
+    schema["properties"].pop("image_credit")
     # Optional to the validator, so recipes saved before them still load, but
     # never to the model: under constrained decoding an optional field is one
     # it may skip, and a written recipe came back with neither — no headnote,
@@ -293,6 +295,8 @@ async def write(
         if isinstance(recipe, dict):
             recipe["created_at"] = datetime.now(timezone.utc).isoformat()
             recipe["image_urls"] = (base or {}).get("image_urls", [])
+            # The credit belongs to the photo, so it goes wherever the photo does.
+            recipe["image_credit"] = (base or {}).get("image_credit")
             if source:
                 recipe["source"] = source
         errors = problems(recipe)

@@ -87,7 +87,12 @@ void main() {
       expect(creditFor('https://mywww.example.com/a.jpg'), 'mywww.example.com');
     });
 
-    test('a stock photo names Pexels, not the CDN it sits on', () {
+    test('a stock photo names its library, not the CDN it sits on', () {
+      expect(
+        creditFor('https://images.unsplash.com/photo-1?ixid=abc&w=1080'),
+        'Unsplash',
+      );
+      // Photos kept before the switch still say where they came from.
       expect(
         creditFor('https://images.pexels.com/photos/1640777/loaf.jpg'),
         'Pexels',
@@ -105,23 +110,26 @@ void main() {
     });
   });
 
-  group('pexelsPhotos', () {
+  group('stockPhotos', () {
     test('no API key means no photos, not an error', () async {
       // `flutter test` builds without --dart-define, so the key is empty. That
       // is the state this has to survive quietly rather than throw in: a
       // checkout with no key is a working app with plainer pictures.
-      expect(await pexelsPhotos('a query with no key behind it'), isEmpty);
+      expect(await stockPhotos('a query with no key behind it'), isEmpty);
     });
 
     test('a blank query is not worth a request', () async {
-      expect(await pexelsPhotos('   '), isEmpty);
+      expect(await stockPhotos('   '), isEmpty);
     });
 
     test('the memo is what the chain and the picker share', () async {
-      seedPexels('seeded query', const ['https://a.example/1.jpg']);
+      seedStockPhotos('seeded query', const ['https://a.example/1.jpg']);
       // Same list, one lookup: the hero takes the first and the picker shows
       // all of them, off a single request.
-      expect(await pexelsPhotos('seeded query'), ['https://a.example/1.jpg']);
+      final photos = await stockPhotos('seeded query');
+      expect([for (final photo in photos) photo.url], [
+        'https://a.example/1.jpg',
+      ]);
     });
   });
 
@@ -218,18 +226,19 @@ void main() {
       await tester.runAsync(() async {
         // Seeded in here, not above: a Future made in the fake-async zone
         // never delivers inside runAsync, and the chain waits on it forever.
-        seedPexels('a photogenic dish', const ['mise://found.png']);
+        seedStockPhotos('a photogenic dish', const ['mise://found.png']);
         chain.resolve(ImageConfiguration.empty);
         // Until it has decoded, not until it is named: winner is optimistic,
         // and keeping a photo waits on the real thing.
-        await pumpUntil(() => chain.winnerFromSearch || chain.exhausted);
+        await pumpUntil(() => chain.winnerFromSearch != null || chain.exhausted);
       });
 
       expect(chain.winner, 'mise://found.png');
       expect(chain.exhausted, isFalse);
       // The half the detail screen keys its auto-save off: this is worth
       // writing down, where a Wikipedia stand-in would not be.
-      expect(chain.winnerFromSearch, isTrue);
+      // With its photographer, which the url alone doesn't carry.
+      expect(chain.winnerFromSearch?.credit.name, 'A Photographer');
     });
 
     testWidgets('a photo the recipe already carries is not a search result', (
@@ -256,7 +265,7 @@ void main() {
       expect(chain.winner, 'mise://own.png');
       // Otherwise the detail screen would rewrite a recipe with the photo it
       // already had, on every visit.
-      expect(chain.winnerFromSearch, isFalse);
+      expect(chain.winnerFromSearch, isNull);
     });
 
     testWidgets('a search result that never loads is never worth keeping', (
@@ -268,10 +277,10 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
       var claimedWhileLoading = false;
       await tester.runAsync(() async {
-        seedPexels('a dead photo', const ['mise://not-there.png']);
+        seedStockPhotos('a dead photo', const ['mise://not-there.png']);
         chain.resolve(ImageConfiguration.empty);
         for (var i = 0; i < 1000 && !chain.exhausted; i++) {
-          claimedWhileLoading |= chain.winnerFromSearch;
+          claimedWhileLoading |= chain.winnerFromSearch != null;
           await Future<void>.delayed(const Duration(milliseconds: 10));
         }
       });
@@ -295,7 +304,7 @@ void main() {
 
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.runAsync(() async {
-        seedPexels('nothing looks like this', const []);
+        seedStockPhotos('nothing looks like this', const []);
         chain.resolve(ImageConfiguration.empty);
         await _drain(chain);
       });

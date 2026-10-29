@@ -4,10 +4,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     # On Cloud Run this comes from Secret Manager; locally from server/.env.
-    # Empty is allowed: Pexels may not be issuing keys, and photo search is the
-    # one feature that can be missing without the app noticing (/photos is a
-    # 503, which it reads as "no photos").
-    PEXELS_KEY: SecretStr = SecretStr("")
+    # Unsplash's access key, sent as Client-ID. Empty is allowed: photo search
+    # is the one feature that can be missing without the app noticing (/photos
+    # is a 503, which it reads as "no photos", and Wikipedia carries on).
+    UNSPLASH_ACCESS_KEY: SecretStr = SecretStr("")
     # Empty is allowed for the same reason: /recipe is a 503 without it, which
     # the app reads as "server recipes aren't available", and pasting still works.
     ANTHROPIC_API_KEY: SecretStr = SecretStr("")

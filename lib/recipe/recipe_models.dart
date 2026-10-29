@@ -70,6 +70,22 @@ class RecipeStep {
   Map<String, dynamic> toJson() => _$RecipeStepToJson(this);
 }
 
+/// A photographer, for the credit line under a stock photo.
+@JsonSerializable()
+class ImageCredit {
+  final String name;
+
+  /// Their profile, built by the server with Unsplash's referral parameters —
+  /// the phone shows it and never assembles one.
+  final String url;
+
+  const ImageCredit({required this.name, required this.url});
+
+  factory ImageCredit.fromJson(Map<String, dynamic> json) =>
+      _$ImageCreditFromJson(json);
+  Map<String, dynamic> toJson() => _$ImageCreditToJson(this);
+}
+
 @JsonSerializable(fieldRename: FieldRename.snake, explicitToJson: true)
 class Recipe {
   final String title;
@@ -86,7 +102,7 @@ class Recipe {
 
   /// Two to four words for what the finished dish looks like, as typed into a
   /// stock photo search. The model's whole half of the picture: it never emits
-  /// a url, it says what to go and find. See `pexelsPhotos` in
+  /// a url, it says what to go and find. See `stockPhotos` in
   /// `recipe_image.dart` for what does the finding.
   ///
   /// It sits after [notes] for the same reason [notes] sits after [steps] —
@@ -106,6 +122,16 @@ class Recipe {
   /// becomes a picture.
   @JsonKey(defaultValue: <String>[])
   final List<String> imageUrls;
+
+  /// Who took the photo in [imageUrls], when it came from the stock photo
+  /// search — Unsplash's terms ask for the photographer by name, linked. Null
+  /// for the cook's own photo, a Wikipedia stand-in, and every recipe saved
+  /// before this existed. **App-owned**, like [imageUrls], and it travels with
+  /// it: whatever sets or clears the photo sets or clears this.
+  ///
+  /// Optional in the schema, not required, for the reason every later field
+  /// is: every save re-validates, and required would brick the recipes on disk.
+  final ImageCredit? imageCredit;
   final List<String> tags;
   final String source;
   final DateTime createdAt;
@@ -118,6 +144,7 @@ class Recipe {
     this.notes,
     this.imageQuery,
     this.imageUrls = const [],
+    this.imageCredit,
     required this.tags,
     required this.source,
     required this.createdAt,

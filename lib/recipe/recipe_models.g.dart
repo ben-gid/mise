@@ -52,6 +52,12 @@ Map<String, dynamic> _$RecipeStepToJson(RecipeStep instance) =>
       'timer_seconds': instance.timerSeconds,
     };
 
+ImageCredit _$ImageCreditFromJson(Map<String, dynamic> json) =>
+    ImageCredit(name: json['name'] as String, url: json['url'] as String);
+
+Map<String, dynamic> _$ImageCreditToJson(ImageCredit instance) =>
+    <String, dynamic>{'name': instance.name, 'url': instance.url};
+
 Recipe _$RecipeFromJson(Map<String, dynamic> json) => Recipe(
   title: json['title'] as String,
   baseServings: (json['base_servings'] as num).toInt(),
@@ -68,6 +74,9 @@ Recipe _$RecipeFromJson(Map<String, dynamic> json) => Recipe(
           ?.map((e) => e as String)
           .toList() ??
       [],
+  imageCredit: json['image_credit'] == null
+      ? null
+      : ImageCredit.fromJson(json['image_credit'] as Map<String, dynamic>),
   tags: (json['tags'] as List<dynamic>).map((e) => e as String).toList(),
   source: json['source'] as String,
   createdAt: DateTime.parse(json['created_at'] as String),
@@ -81,6 +90,7 @@ Map<String, dynamic> _$RecipeToJson(Recipe instance) => <String, dynamic>{
   'notes': instance.notes,
   'image_query': instance.imageQuery,
   'image_urls': instance.imageUrls,
+  'image_credit': instance.imageCredit?.toJson(),
   'tags': instance.tags,
   'source': instance.source,
   'created_at': instance.createdAt.toIso8601String(),

@@ -41,6 +41,16 @@
       "items": { "type": "string", "pattern": "^(https|mise)://" },
       "description": "Left to the app. It holds the one photo the cook settled on, or a mise:// photo off their device. Do not emit it: a url you supply overrides the photo search and is usually a 404. Describe the dish in image_query instead. https only \u2014 phones block cleartext http."
     },
+    "image_credit": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["name", "url"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "url": { "type": "string", "pattern": "^https://" }
+      },
+      "description": "Left to the app. Who took the photo in image_urls, when it came from a photo library: the photographer's name and a link to their profile. Do not emit it."
+    },
     "tags": {
       "type": "array",
       "items": { "type": "string", "minLength": 1 }

@@ -17,7 +17,7 @@ flutter run --dart-define-from-file=env.json   # with photos and accounts; see e
 # server/ — photo search proxy, account routes, recipes (FastAPI, uv, Cloud Run)
 cd server && uv run pytest
 cd server && uv run python -m eval.run   # real Haiku calls on eval/cases.json; costs cents
-cd server && uv run uvicorn app.main:app --reload   # needs server/.env (SUPABASE_*; PEXELS_KEY optional)
+cd server && uv run uvicorn app.main:app --reload   # needs server/.env (SUPABASE_*; UNSPLASH_ACCESS_KEY optional)
 
 # Ship: all tests, then Supabase migrations, then Cloud Run → api.mise.bengid.dev
 scripts/deploy.sh            # asks once before changing anything; --yes skips the prompt
@@ -164,11 +164,26 @@ weight below ~½ oz stays in grams, where a tenth of an ounce is 13% of 5 g.
 half: two to four words for what the finished dish *looks like*, in the vocabulary of a
 stock photo search ("creamy mushroom pasta", never "Nonna's Sunday gravy"). It sits
 after `notes` in the schema for the same reason `notes` sits after `steps`. The app
-searches Pexels with it, because the goal is a *beautiful* photo, and the model used to
+searches Unsplash with it, because the goal is a *beautiful* photo, and the model used to
 be asked for urls instead — which, told to prefer stable sources, meant a Wikimedia
 Commons photo nearly every time: the same plain picture the Wikipedia fallback finds
-for free. The trade is accuracy: a Pexels photo is of something that looks like the
-dish, not of this recipe, and `creditFor` says "Pexels" so a reader can tell.
+for free. The trade is accuracy: a stock photo is of something that looks like the
+dish, not of this recipe, and the credit line names the photographer so a reader can
+tell. It was Pexels until Pexels stopped issuing keys; recipes still carry Pexels urls,
+and `creditFor` still names them.
+
+`image_credit` (`{name, url}`, optional) is the photographer of the photo in
+`image_urls`, because Unsplash's terms ask for the name, linked, wherever a photo is
+shown. A schema field and not a sidecar because it has to travel with the photo through
+sync, history and Undo for free. App-owned like `image_urls`, and the two move together:
+`_setPhoto` writes both, the editor's `_draft()` keeps the credit only while the urls
+are unchanged, and `/recipe` copies both off the base recipe. The hero shows "Photo by
+*name* on *Unsplash*" only while the url on screen is `image_urls.first`; otherwise it
+falls back to `creditFor`'s host. The server builds the profile link, referral
+parameters included, so the phone never knows Unsplash's url shapes. Keeping a search
+result — automatically or from the picker — also fires `keptStockPhoto`, Unsplash's
+required "download" ping (`POST /photos/used`), never awaited. The server takes a photo
+id there, never a url, because it attaches the key to whatever it calls.
 
 `image_urls` is **app-owned**: the one photo the cook picked, or a `mise://<filename>`
 copied in beside the recipes by `RecipeStore.addImage`. The prompt tells the model to
@@ -178,26 +193,27 @@ The urls are relative on purpose where local: iOS hands the app container a new 
 every update, so an absolute path saved today is dead after the next release. `https`
 only, never `http` — phones block cleartext.
 
-The chain is own urls → `pexelsPhotos(image_query)` → `wikipediaImage(title)` → no
+The chain is own urls → `stockPhotos(image_query)` → `wikipediaImage(title)` → no
 photo, as a queue of fallbacks in `ImageChain` that only shrinks — that is its whole
 termination argument. Wikipedia is demoted, not deleted: it is a photo of *this* dish,
-and the only link that works in a build with no proxy. `pexelsPhotos` memoises the whole
+and the only link that works in a build with no proxy. `stockPhotos` memoises the whole
 nine-result page per query for the run, so the hero takes the first and the picker sheet
 shows all nine off one request. The proxy url is compile-time (`PHOTO_PROXY`, from a
 gitignored `env.json`); an empty one returns no photos rather than failing, which is also
 what keeps `flutter test` offline.
 
-**The Pexels key never ships in the app.** Anything compiled in can be read back out of
-an APK, and one key's 200/hour is shared by every install. [server/](server/) is a
+**The Unsplash key never ships in the app.** Anything compiled in can be read back out
+of an APK, and one key's hourly quota (50 until Unsplash approves the app for
+production) is shared by every install. [server/](server/) is a
 one-route FastAPI proxy on Cloud Run: `GET /photos?query=` answers a JSON list of urls,
-best first, with the key from Secret Manager. It caches each query for a day across every
+best first, each `{url, id, name, link}`, with the key from Secret Manager. It caches each query for a day across every
 phone, and an upstream failure is a 502 that is never cached, so a 429 does not stick as
-"no photos". The key is optional: with none (Pexels stopped issuing them), `/photos` is a
+"no photos". The key is optional: with none, `/photos` is a
 503 before any cache or upstream work, the app reads that as "no photos" and falls
 through to Wikipedia, and `scripts/deploy.sh` deploys without the secret. It departs from the usual FastAPI layout on purpose — no `api/routes/`, no
 `crud.py`, no generated client, no database — because it is one route and one caller,
-and the Dart side parses a list of strings by hand. The url is public, so the key is
-safe but the quota is not: each caller IP gets 50 Pexels searches an hour (cache hits
+and the Dart side parses the list by hand. The url is public, so the key is
+safe but the quota is not: each caller IP gets 50 Unsplash calls an hour, searches and pings together (cache hits
 are free), and over that is a 429 the app reads as "no photos". The IP is the *last*
 `X-Forwarded-For` entry, the one Cloud Run appends — the rest is client-supplied and
 forgeable. Behind a load balancer that would need to be second-last, or every phone
@@ -222,7 +238,7 @@ an asymmetry that is cheaper than a second `ImagePicker` path.
 [lib/recipe/recipe_image.dart](lib/recipe/recipe_image.dart) is the chokepoint,
 the way `amountLabel` is for amounts: `imageFor` turns a url into something
 paintable, `creditFor` turns it into the host shown under the photo, and
-`ImageChain` walks the list until one loads. `imageFor` hands back a `CachedNetworkImageProvider`, not a plain `NetworkImage`: `dart:io`'s HttpClient has no HTTP cache at all — it ignores `Cache-Control` and `ETag` — and Flutter's `ImageCache` dies with the process, so every cold start re-downloaded every photo, and a kitchen with no signal showed none. The `_pexels` and `_wikipedia` memos are still per-run; only the images survive a restart. The chain is **headless** — it
+`ImageChain` walks the list until one loads. `imageFor` hands back a `CachedNetworkImageProvider`, not a plain `NetworkImage`: `dart:io`'s HttpClient has no HTTP cache at all — it ignores `Cache-Control` and `ETag` — and Flutter's `ImageCache` dies with the process, so every cold start re-downloaded every photo, and a kitchen with no signal showed none. The `_stock` and `_wikipedia` memos are still per-run; only the images survive a restart. The chain is **headless** — it
 resolves through the image cache without painting — because the detail screen
 *sizes its app bar* on the outcome, and a widget that rendered the chain and
 reported upwards would loop: child says exhausted, parent shrinks, child
@@ -386,7 +402,7 @@ a recipe that passes spends one, and a `pro_until` in the future spends none.
 Every call that reached the model is a row in `usage`, failed ones too. Tries are
 per user and a script can make users, so `/recipe` also has a per-IP hourly
 limit, the same window code as `/photos`. No `ANTHROPIC_API_KEY` is a 503, the
-empty-`PEXELS_KEY` rule; on the phone, no accounts or no `PHOTO_PROXY` hides the
+empty-`UNSPLASH_ACCESS_KEY` rule; on the phone, no accounts or no `PHOTO_PROXY` hides the
 controls (`serverRecipesOn`), so `flutter test` never shows them. Import's waits are
 a blocking `whileWriting` dialog and Create's are a line in its chat
 (`writeOrUpgrade(inline: true)`) — both an indefinite bar, which is fine only
@@ -489,14 +505,14 @@ constructed once in `main()` and passed down by constructor.
   sign-in on Android needs the signing key's SHA-1 on the Android OAuth client; the
   debug keystore here lives at `~/.config/.android/debug.keystore`, not `~/.android`.
 - A `Future` made in the fake-async zone never delivers inside `tester.runAsync`.
-  `seedPexels` stores one, so call it *inside* `runAsync`; seeded above it, the chain
+  `seedStockPhotos` stores one, so call it *inside* `runAsync`; seeded above it, the chain
   waits on the seed until the test times out, with no error. `pumpPhotos` in
   `widget_test.dart` takes a `search:` map and seeds it in the right place. The memo
-  also outlives a test, which is why that file's `tearDown` calls `forgetPexels`.
+  also outlives a test, which is why that file's `tearDown` calls `forgetStockPhotos`.
 - `_draft()` in the editor builds a `Recipe` field by field. A field added to `Recipe`
   but not to `_draft()` is erased by the first form save, with no error — that is why
   it carries `imageQuery` next to `source` and `createdAt`.
-- The picker awaits `pexelsPhotos` *before* opening the sheet, never inside it. A
+- The picker awaits `stockPhotos` *before* opening the sheet, never inside it. A
   spinner in a modal is an indefinite animation, and `pumpAndSettle` never returns.
 - The detail screen is a `CustomScrollView`, not a `ListView`, and passes
   `appBar: null` — a `SliverAppBar` is not a `PreferredSizeWidget`, so it cannot

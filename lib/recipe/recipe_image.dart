@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/widgets.dart';
 
+import 'recipe_models.dart';
 import 'recipe_store.dart';
 
 /// The one place a recipe's `image_url` becomes something paintable, and the
@@ -23,7 +24,7 @@ const _localScheme = 'mise://';
 /// The photo search proxy in `server/`, e.g. `https://api.mise.bengid.dev`.
 /// Read at compile time: `flutter run --dart-define-from-file=env.json`.
 ///
-/// A proxy rather than the Pexels key itself: anything compiled into the app
+/// A proxy rather than the Unsplash key itself: anything compiled into the app
 /// can be read back out of the APK, and the key's quota is shared by every
 /// install. The server holds the key and caches results across all of them.
 ///
@@ -70,14 +71,28 @@ String? creditFor(String? url) {
   // what anyone calls it. Naming Wikipedia also says the quiet part out loud:
   // this is a photo of the dish, not a photo of this recipe.
   if (host.endsWith('wikimedia.org')) return 'Wikipedia';
-  // images.pexels.com is where the file lives and is not what anyone calls it.
-  // Naming Pexels is also the price of the photos — their terms ask for it —
-  // and it says the quiet part out loud the same way Wikipedia does: this is a
-  // photograph of something that looks like the dish, not of this recipe.
+  // Where the file lives is not what anyone calls it, and naming the library
+  // says the quiet part out loud the same way Wikipedia does: this is a
+  // photograph of something that looks like the dish, not of this recipe. A
+  // kept Unsplash photo is credited to its photographer instead (see
+  // `Recipe.imageCredit`); this is what shows before it has been kept. Pexels
+  // is the search this replaced, and recipes still carry its photos.
+  if (host.endsWith('unsplash.com')) return 'Unsplash';
   if (host.endsWith('pexels.com')) return 'Pexels';
   // Guarded rather than replaceFirst, which would eat the 'www.' out of the
   // middle of a host like 'mywww.example.com'.
   return host.startsWith('www.') ? host.substring(4) : host;
+}
+
+/// One result from the stock photo search: the picture, and who took it.
+class StockPhoto {
+  final String url;
+
+  /// Unsplash's id for it, for [keptStockPhoto].
+  final String id;
+  final ImageCredit credit;
+
+  const StockPhoto({required this.url, required this.id, required this.credit});
 }
 
 /// Stock photographs of what the dish looks like, best first.
@@ -86,23 +101,23 @@ String? creditFor(String? url) {
 /// title is a name — "Nonna's Sunday gravy" — and a photo library is indexed by
 /// what is in the frame. That is the whole trade this makes: the picture is
 /// beautiful and is of *something that looks like* the dish, where
-/// [wikipediaImage] is plain and is of the dish itself. [creditFor] says
-/// "Pexels" so a reader can tell which they are looking at.
+/// [wikipediaImage] is plain and is of the dish itself. The credit line names
+/// the photographer so a reader can tell which they are looking at.
 ///
 /// Holds the whole page rather than the winner: the chain takes the first and
 /// the picker shows the rest, and between them that is one request.
-Future<List<String>> pexelsPhotos(String query) =>
-    _pexels.putIfAbsent(query, () => _fetchPexels(query));
+Future<List<StockPhoto>> stockPhotos(String query) =>
+    _stock.putIfAbsent(query, () => _fetchStock(query));
 
 /// Per run, keyed by query, the same bargain [wikipediaImage] makes: two
 /// recipes that look alike share one lookup, and only the *images* survive a
 /// restart.
-final _pexels = <String, Future<List<String>>>{};
+final _stock = <String, Future<List<StockPhoto>>>{};
 
 /// Drops every seeded or fetched result, so one test's photos do not show up
 /// in the next — the memo outlives a test the way it outlives a screen.
 @visibleForTesting
-void forgetPexels() => _pexels.clear();
+void forgetStockPhotos() => _stock.clear();
 
 /// Lets a test drive the hit path. Nothing under `flutter test` reaches a
 /// network — the binding answers every https request with 400 — so the only way
@@ -112,15 +127,25 @@ void forgetPexels() => _pexels.clear();
 /// one made in the fake-async zone never delivers to a chain walking under the
 /// real clock: the test just waits until it times out.
 @visibleForTesting
-void seedPexels(String query, List<String> urls) =>
-    _pexels[query] = Future.value(urls);
+void seedStockPhotos(String query, List<String> urls) =>
+    _stock[query] = Future.value([
+      for (final url in urls)
+        StockPhoto(
+          url: url,
+          id: 'seed',
+          credit: const ImageCredit(
+            name: 'A Photographer',
+            url: 'https://unsplash.com/@a',
+          ),
+        ),
+    ]);
 
-Future<List<String>> _fetchPexels(String query) async {
+Future<List<StockPhoto>> _fetchStock(String query) async {
   // No proxy is the normal state of a fresh checkout and of the test suite.
   // Skipping quietly beats a link in the chain that always errors.
   if (_photoProxy.isEmpty || query.trim().isEmpty) return const [];
   // Page size, orientation and rendition are chosen server-side, in
-  // server/app/pexels.py. What comes back is just the urls, best first.
+  // server/app/unsplash.py, and so is the credit link.
   final uri = Uri.parse(
     _photoProxy,
   ).resolve('photos').replace(queryParameters: {'query': query});
@@ -130,14 +155,46 @@ Future<List<String>> _fetchPexels(String query) async {
     if (response.statusCode != HttpStatus.ok) return const [];
     final body = jsonDecode(await response.transform(utf8.decoder).join());
     return [
-      for (final url in body as List)
-        if (url is String) url,
+      for (final photo in body as List)
+        if (photo case {
+          'url': final String url,
+          'id': final String id,
+          'name': final String name,
+          'link': final String link,
+        })
+          StockPhoto(
+            url: url,
+            id: id,
+            credit: ImageCredit(name: name, url: link),
+          ),
     ];
   } catch (_) {
-    // Offline, a 502 when Pexels is down or out of quota, malformed JSON —
+    // Offline, a 502 when Unsplash is down or out of quota, malformed JSON —
     // none of them should take a recipe screen down, so they all read as
     // "no photos".
     return const [];
+  } finally {
+    client.close();
+  }
+}
+
+/// Tells Unsplash a recipe kept [photo] — its terms' "download", which counts
+/// toward the photographer. Only for keeping, never for showing.
+///
+/// Fire and forget: a lost ping costs a photographer a tally, never the cook a
+/// photo, so nothing waits on it and every failure is swallowed.
+Future<void> keptStockPhoto(StockPhoto photo) async {
+  if (_photoProxy.isEmpty) return;
+  final client = HttpClient();
+  try {
+    final request = await client.postUrl(
+      Uri.parse(_photoProxy).resolve('photos/used'),
+    );
+    request.headers.contentType = ContentType.json;
+    request.write(jsonEncode({'id': photo.id}));
+    await (await request.close()).drain<void>();
+  } catch (_) {
+    // See above.
   } finally {
     client.close();
   }
@@ -218,7 +275,7 @@ class ImageChain {
   /// url I typed work" is a question a stand-in photo answers wrongly.
   final String? title;
 
-  /// What the dish looks like, for [pexelsPhotos] — or null to skip it. Null in
+  /// What the dish looks like, for [stockPhotos] — or null to skip it. Null in
   /// the editor's preview for the same reason [title] is.
   final String? query;
 
@@ -248,15 +305,16 @@ class ImageChain {
   late final List<Future<String?> Function()> _fallbacks = [
     if (query != null)
       () async {
-        final photos = await pexelsPhotos(query!);
-        return _fromSearch = photos.isEmpty ? null : photos.first;
+        final photos = await stockPhotos(query!);
+        _fromSearch = photos.isEmpty ? null : photos.first;
+        return _fromSearch?.url;
       },
     if (title != null) () => wikipediaImage(title!),
   ];
 
   /// What the photo search turned up, if anything, so [winnerFromSearch] can
   /// tell it from a Wikipedia consolation prize.
-  String? _fromSearch;
+  StockPhoto? _fromSearch;
 
   /// The url that has actually decoded, as opposed to [winner], which is
   /// optimistic and names a url before it has loaded.
@@ -278,16 +336,19 @@ class ImageChain {
   /// reads as a recipe with no photo.
   bool get exhausted => _settled;
 
-  /// Whether what is on screen came from [pexelsPhotos] *and has loaded*.
+  /// What is on screen, when it came from [stockPhotos] *and has loaded* —
+  /// with its credit, which the url alone doesn't carry.
   ///
-  /// The detail screen keeps a photo that answers true and leaves one that
-  /// answers false where it is: pinning a recipe to the plain Wikipedia stand-in
+  /// The detail screen keeps a photo this names and leaves one it doesn't
+  /// where it is: pinning a recipe to the plain Wikipedia stand-in
   /// is the thing the search exists to stop. Loaded, not merely [winner],
   /// because [winner] is optimistic — keeping a url before it decodes would
   /// write a dead link into the recipe for good, and every visit after would
   /// spend an attempt on it.
-  bool get winnerFromSearch =>
-      winner != null && winner == _fromSearch && winner == _loaded;
+  StockPhoto? get winnerFromSearch =>
+      winner != null && winner == _fromSearch?.url && winner == _loaded
+      ? _fromSearch
+      : null;
 
   void resolve(ImageConfiguration config) {
     // Kept so the Wikipedia fallback, which arrives a round trip later, can

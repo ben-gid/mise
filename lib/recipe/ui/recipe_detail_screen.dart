@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../recipe_image.dart';
 import '../recipe_models.dart';
@@ -197,17 +198,25 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
   /// and the rebuilt chain's winner comes from there rather than from a search.
   Future<void> _keepFoundPhoto() async {
     if (_keeping || _recipe.imageUrls.isNotEmpty) return;
-    final found = _photos;
-    if (found == null || !found.winnerFromSearch) return;
+    final found = _photos?.winnerFromSearch;
+    if (found == null) return;
     _keeping = true;
     try {
-      await _setPhoto(found.winner!);
+      await _keepStockPhoto(found);
     } finally {
       _keeping = false;
     }
   }
 
-  /// Pins [url] onto the recipe, in place.
+  /// [_setPhoto] for a search result: with its photographer, and with the
+  /// ping Unsplash asks for when a photo is kept rather than just shown.
+  Future<void> _keepStockPhoto(StockPhoto photo) {
+    unawaited(keptStockPhoto(photo));
+    return _setPhoto(photo.url, photo.credit);
+  }
+
+  /// Pins [url] onto the recipe, in place, with [credit] — always both, so a
+  /// credit can never outlive the photo it names.
   ///
   /// [RecipeStore.save] and not `saveVersion`: the id is
   /// `<createdAtMillis>-<title-slug>` and neither half moves here, so this
@@ -224,11 +233,12 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
   /// Unvalidated, like the list screen's Undo, which is the other caller that
   /// re-saves a recipe that already parsed once. The url came from our own
   /// search or our own picker, not from a model.
-  Future<void> _setPhoto(String url) async {
+  Future<void> _setPhoto(String url, ImageCredit? credit) async {
     // Recipe has no copyWith; a modified copy goes back through the map.
     final updated = Recipe.fromJson({
       ..._recipe.toJson(),
       'image_urls': [url],
+      'image_credit': credit?.toJson(),
     });
     await widget.store.save(updated);
     if (!mounted) return;
@@ -242,16 +252,16 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
   /// The search is awaited *before* the sheet opens rather than inside it. A
   /// spinner in a modal is an indefinite animation and `pumpAndSettle` never
   /// returns on one (CLAUDE.md), and there is nothing to wait for anyway — the
-  /// hero ran this exact query on the way in and [pexelsPhotos] is memoised.
+  /// hero ran this exact query on the way in and [stockPhotos] is memoised.
   ///
   /// Falls back to the title when a recipe carries no `image_query`. Those are
   /// the wrong words to spend a chain link on — "Nonna's Sunday gravy" matches
   /// nothing in a photo library — but the right ones to hand a human who can
   /// look at what comes back and judge.
   Future<void> _pickPhoto() async {
-    final photos = await pexelsPhotos(_recipe.imageQuery ?? _recipe.title);
+    final photos = await stockPhotos(_recipe.imageQuery ?? _recipe.title);
     if (!mounted) return;
-    final picked = await showModalBottomSheet<String>(
+    final picked = await showModalBottomSheet<Object>(
       context: context,
       isScrollControlled: true,
       // The sheet's own Material stays clear so frost is the only surface;
@@ -275,7 +285,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
     // It costs a version, where a stock pick does not — an asymmetry worth
     // less than a duplicated picker.
     if (picked == _ownPhoto) return _edit(pickImage: true);
-    await _setPhoto(picked);
+    if (picked is StockPhoto) await _keepStockPhoto(picked);
   }
 
   /// Flips one ingredient between weight and volume, for the length of this
@@ -682,9 +692,16 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
                   image: imageFor(winner, widget.store),
                   // The url that actually loaded, not the one ranked first.
                   credit: creditFor(winner),
+                  // Only while the photo it names is the one on screen: a
+                  // credit under somebody else's picture is worse than none.
+                  photographer: winner == _recipe.imageUrls.firstOrNull
+                      ? _recipe.imageCredit
+                      : null,
                 ),
               ),
-              barPane(context, opacity: 1 - open),
+              // Decoration only, and on top: a DecoratedBox hit-tests even
+              // when transparent, which swallowed taps on the photo credit.
+              IgnorePointer(child: barPane(context, opacity: 1 - open)),
             ],
           ),
         );
@@ -772,8 +789,13 @@ class _HeroImage extends StatelessWidget {
   /// there is nothing to put in the picture's place.
   final ImageProvider? image;
   final String? credit;
+  final ImageCredit? photographer;
 
-  const _HeroImage({required this.image, required this.credit});
+  const _HeroImage({
+    required this.image,
+    required this.credit,
+    required this.photographer,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -791,7 +813,14 @@ class _HeroImage extends StatelessWidget {
             // animation, and pumpAndSettle never returns on one (CLAUDE.md).
           ),
         const DecoratedBox(decoration: BoxDecoration(gradient: heroScrim)),
-        if (credit case final credit?)
+        if (photographer case final photographer?)
+          Positioned(
+            left: 4,
+            right: 4,
+            bottom: 2,
+            child: _PhotographerCredit(photographer),
+          )
+        else if (credit case final credit?)
           Positioned(left: 16, right: 16, bottom: 14, child: _Credit(credit)),
       ],
     );
@@ -826,6 +855,49 @@ class _Credit extends StatelessWidget {
     );
   }
 }
+
+/// "Photo by Jane Doe on Unsplash", the way Unsplash's terms ask for it: the
+/// photographer and Unsplash each a link. Two buttons rather than one line
+/// with tap spans, so each gets a finger-sized target on a phone.
+class _PhotographerCredit extends StatelessWidget {
+  final ImageCredit credit;
+
+  const _PhotographerCredit(this.credit);
+
+  @override
+  Widget build(BuildContext context) {
+    final ink = Colors.white.withValues(alpha: 0.85);
+    final style = Theme.of(
+      context,
+    ).textTheme.labelSmall?.copyWith(color: ink, letterSpacing: 0.6);
+    Widget link(String text, String url) => TextButton(
+      onPressed: () => launchUrl(
+        Uri.parse(url),
+        mode: LaunchMode.externalApplication,
+      ),
+      style: TextButton.styleFrom(
+        foregroundColor: ink,
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        minimumSize: const Size(0, 44),
+        textStyle: style?.copyWith(decoration: TextDecoration.underline),
+      ),
+      child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis),
+    );
+    return Row(
+      children: [
+        const SizedBox(width: 12),
+        Icon(Icons.photo_camera_outlined, size: 13, color: ink),
+        const SizedBox(width: 2),
+        Flexible(child: link(credit.name, credit.url)),
+        Text('on', style: style),
+        link('Unsplash', _unsplashHome),
+      ],
+    );
+  }
+}
+
+const _unsplashHome =
+    'https://unsplash.com/?utm_source=mise&utm_medium=referral';
 
 /// "bread · vegetarian · make-ahead", above the name. One Text per tag so
 /// each stays a word of its own for a screen reader.
@@ -1723,7 +1795,7 @@ const _ownPhoto = 'mise://pick';
 /// spelled out on [_RecipeDetailScreenState._pickPhoto] — a spinner in a modal
 /// is an animation `pumpAndSettle` waits on forever.
 class _PhotoSheet extends StatelessWidget {
-  final List<String> photos;
+  final List<StockPhoto> photos;
   final RecipeStore store;
 
   const _PhotoSheet({required this.photos, required this.store});
@@ -1775,16 +1847,16 @@ class _PhotoSheet extends StatelessWidget {
                   mainAxisSpacing: 6,
                   crossAxisSpacing: 6,
                   children: [
-                    for (final url in photos)
+                    for (final photo in photos)
                       InkWell(
-                        onTap: () => Navigator.pop(context, url),
+                        onTap: () => Navigator.pop(context, photo),
                         borderRadius: BorderRadius.circular(12),
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(12),
                           child: Image(
                             // Through the chokepoint, so a tile and the hero
                             // can never disagree about what a url paints as.
-                            image: imageFor(url, store)!,
+                            image: imageFor(photo.url, store)!,
                             fit: BoxFit.cover,
                             // No loadingBuilder — see the class docs.
                             errorBuilder: (_, _, _) =>
@@ -1797,7 +1869,7 @@ class _PhotoSheet extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                'Photos from Pexels',
+                'Photos from Unsplash',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),

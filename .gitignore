@@ -47,7 +47,7 @@ app.*.map.json
 # Holds the photo proxy url. See env.example.json.
 env.json
 
-# server/: the venv, and the Pexels key for running it locally
+# server/: the venv, and the server's keys for running it locally
 .venv/
 __pycache__/
 .pytest_cache/

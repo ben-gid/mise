@@ -1,7 +1,7 @@
 [project]
 name = "mise-photos"
 version = "0.1.0"
-description = "Holds the Pexels key so the mise app doesn't have to."
+description = "Holds the mise app's keys so the app doesn't have to."
 requires-python = ">=3.13"
 dependencies = [
     "anthropic>=2.3.0",

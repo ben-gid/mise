@@ -90,14 +90,16 @@ def test_a_sentence_comes_back_as_a_recipe_and_spends_a_try(claude, db):
 def test_the_time_and_photos_are_set_here_not_by_the_model(claude, db):
     claude.answers = [{**FOCACCIA, "image_urls": ["https://made.up/x.jpg"]}]
     written = post({"text": "focaccia"}).json()
-    assert written["image_urls"] == []
+    assert written["image_urls"] == [] and written["image_credit"] is None
     assert datetime.fromisoformat(written["created_at"]) > datetime.now(timezone.utc) - timedelta(minutes=1)
 
 
 def test_an_adapted_recipe_keeps_the_cooks_photo(claude, db):
-    base = {**FOCACCIA, "image_urls": ["mise://1.jpg"]}
+    credit = {"name": "Jane Doe", "url": "https://unsplash.com/@janedoe"}
+    base = {**FOCACCIA, "image_urls": ["https://images.unsplash.com/1"], "image_credit": credit}
     written = post({"text": "make it vegan", "base": base}).json()
-    assert written["image_urls"] == ["mise://1.jpg"]
+    assert written["image_urls"] == ["https://images.unsplash.com/1"]
+    assert written["image_credit"] == credit
     assert "make it vegan" in json.dumps(claude.calls[0])
 
 
@@ -288,6 +290,7 @@ def test_the_model_must_write_a_headnote_and_a_photo_query():
     required = recipes._format["schema"]["required"]
     assert "notes" in required and "image_query" in required
     assert "image_urls" not in recipes._format["schema"]["properties"]
+    assert "image_credit" not in recipes._format["schema"]["properties"]
 
 
 def test_a_site_that_blocks_apps_says_what_to_do(claude, db, web):

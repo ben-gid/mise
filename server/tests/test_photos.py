@@ -5,7 +5,7 @@ from pydantic import SecretStr
 import pytest
 from fastapi.testclient import TestClient
 
-from app import main, pexels
+from app import main, unsplash
 from app.main import app
 
 client = TestClient(app)
@@ -13,41 +13,57 @@ client = TestClient(app)
 
 @pytest.fixture
 def upstream(monkeypatch):
-    """Stands in for api.pexels.com: answers with `status`, records `requests`."""
+    """Stands in for api.unsplash.com: answers with `status`, records `requests`."""
     fake = SimpleNamespace(requests=[], status=200)
 
     def handler(request: httpx.Request) -> httpx.Response:
         fake.requests.append(request)
+        user = {"name": "Jane Doe", "username": "janedoe"}
         body = {
-            "photos": [
-                {"src": {"large": "https://images.pexels.com/1.jpeg"}},
-                {"src": {}},
-                {"src": {"large": "https://images.pexels.com/2.jpeg"}},
+            "results": [
+                {"id": "a1", "urls": {"regular": "https://images.unsplash.com/1"}, "user": user},
+                # No credit to give is no photo to show: Unsplash's terms ask for one.
+                {"id": "b2", "urls": {"regular": "https://images.unsplash.com/x"}, "user": {}},
+                {"id": "c3", "urls": {}, "user": user},
+                {"id": "d4", "urls": {"regular": "https://images.unsplash.com/2"}, "user": user},
             ]
         }
         return httpx.Response(fake.status, json=body)
 
-    monkeypatch.setattr(pexels, "_cache", {})
+    monkeypatch.setattr(unsplash, "_cache", {})
     monkeypatch.setattr(main, "_windows", {})
     monkeypatch.setattr(
-        pexels,
+        unsplash,
         "_client",
         httpx.AsyncClient(
-            base_url="https://api.pexels.com/v1", transport=httpx.MockTransport(handler)
+            base_url="https://api.unsplash.com", transport=httpx.MockTransport(handler)
         ),
     )
     return fake
 
 
-def test_returns_urls_and_sends_the_key(upstream):
+def test_returns_credited_photos_and_sends_the_key(upstream):
     response = client.get("/photos", params={"query": "creamy mushroom pasta"})
     assert response.status_code == 200
+    link = "https://unsplash.com/@janedoe?utm_source=mise&utm_medium=referral"
     assert response.json() == [
-        "https://images.pexels.com/1.jpeg",
-        "https://images.pexels.com/2.jpeg",
+        {"url": "https://images.unsplash.com/1", "id": "a1", "name": "Jane Doe", "link": link},
+        {"url": "https://images.unsplash.com/2", "id": "d4", "name": "Jane Doe", "link": link},
     ]
-    assert upstream.requests[0].headers["Authorization"] == "test-key"
+    assert upstream.requests[0].headers["Authorization"] == "Client-ID test-key"
     assert upstream.requests[0].url.params["query"] == "creamy mushroom pasta"
+
+
+def test_a_kept_photo_is_reported_to_unsplash(upstream):
+    assert client.post("/photos/used", json={"id": "a1"}).status_code == 204
+    assert upstream.requests[0].url.path == "/photos/a1/download"
+    assert upstream.requests[0].headers["Authorization"] == "Client-ID test-key"
+
+
+def test_a_used_photo_id_cannot_steer_the_request(upstream):
+    # The key goes on whatever url this builds, so an id can't be a path.
+    assert client.post("/photos/used", json={"id": "../me"}).status_code == 422
+    assert upstream.requests == []
 
 
 def test_a_repeat_query_is_served_from_cache(upstream):
@@ -84,9 +100,9 @@ def test_a_forged_forwarded_for_does_not_buy_a_fresh_limit(upstream, monkeypatch
     assert ask("pho", "2.2.2.2") == 429
 
 
-def test_no_pexels_key_is_a_503_without_calling_upstream(upstream, monkeypatch):
-    # Pexels isn't issuing keys: the server still deploys and serves accounts,
-    # and the app reads the 503 as "no photos" and falls through to Wikipedia.
-    monkeypatch.setattr(main.settings, "PEXELS_KEY", SecretStr(""))
+def test_no_unsplash_key_is_a_503_without_calling_upstream(upstream, monkeypatch):
+    # Without a key the server still deploys and serves accounts, and the app
+    # reads the 503 as "no photos" and falls through to Wikipedia.
+    monkeypatch.setattr(main.settings, "UNSPLASH_ACCESS_KEY", SecretStr(""))
     assert client.get("/photos", params={"query": "ramen"}).status_code == 503
     assert upstream.requests == []

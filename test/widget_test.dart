@@ -36,7 +36,7 @@ void main() {
     dir.deleteSync(recursive: true);
     // A photo search seeded by one test would otherwise surface in every
     // recipe the tests after it open.
-    forgetPexels();
+    forgetStockPhotos();
     timers.value = const {};
   });
 
@@ -273,7 +273,7 @@ void main() {
   /// those need the real clock (see CLAUDE.md). Returns the id it was saved
   /// under.
   ///
-  /// [search] stands in for Pexels, query to results. It is seeded inside the
+  /// [search] stands in for Unsplash, query to results. It is seeded inside the
   /// `runAsync`: a seed made in the fake-async zone never delivers to a chain
   /// walking under the real clock.
   Future<String> pumpPhotos(
@@ -288,7 +288,7 @@ void main() {
     });
     final id = (await tester.runAsync(() => store.save(recipe)))!;
     await tester.runAsync(() async {
-      search.forEach(seedPexels);
+      search.forEach(seedStockPhotos);
       await tester.pumpWidget(
         MaterialApp(
           home: RecipeDetailScreen(
@@ -357,6 +357,17 @@ void main() {
 
     expect(id, expectedId);
     expect(onDisk().imageUrls, ['mise://found.png']);
+    // Kept with its photographer, and credited to them under the photo.
+    expect(onDisk().imageCredit?.name, 'A Photographer');
+    // The screen adopts the saved recipe a beat after the file lands, under
+    // the real clock — pumped until it has, never a single pump (CLAUDE.md).
+    await tester.runAsync(
+      () => pumpUntil(
+        tester,
+        () => find.text('A Photographer').evaluate().isNotEmpty,
+      ),
+    );
+    expect(find.text('A Photographer'), findsOneWidget);
     // Same id, so the cook log stays attached and nothing lands in history —
     // the two things a trip through saveVersion would have broken.
     final (entries, history) = (await tester.runAsync(
@@ -392,7 +403,7 @@ void main() {
       );
     });
     await tester.pumpAndSettle();
-    expect(find.text('Photos from Pexels'), findsOneWidget);
+    expect(find.text('Photos from Unsplash'), findsOneWidget);
 
     await tester.tap(
       find.descendant(
@@ -406,6 +417,7 @@ void main() {
     );
 
     expect(onDisk().imageUrls, ['mise://other.png']);
+    expect(onDisk().imageCredit?.name, 'A Photographer');
     final (entries, history) = (await tester.runAsync(
       () async => (await store.entries(id), await store.history(id)),
     ))!;

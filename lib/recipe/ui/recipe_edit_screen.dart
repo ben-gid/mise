@@ -190,6 +190,10 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
   /// necessarily valid — [_save] is what decides that.
   Recipe _draft() {
     final ingredients = _draftIngredients();
+    final imageUrls = [
+      for (final url in _imageUrls.text.split('\n'))
+        if (url.trim().isNotEmpty) url.trim(),
+    ];
     return Recipe(
       title: _title.text.trim(),
       baseServings:
@@ -205,10 +209,12 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
           ),
       ],
       notes: _notes.text.trim().isEmpty ? null : _notes.text.trim(),
-      imageUrls: [
-        for (final url in _imageUrls.text.split('\n'))
-          if (url.trim().isNotEmpty) url.trim(),
-      ],
+      imageUrls: imageUrls,
+      // The credit names a photo, so it stays only while that photo does: a
+      // url edited by hand or a photo off the device leaves it behind.
+      imageCredit: listEquals(imageUrls, widget.recipe.imageUrls)
+          ? widget.recipe.imageCredit
+          : null,
       tags: [
         for (final tag in _tags.text.split(','))
           if (tag.trim().isNotEmpty) tag.trim(),

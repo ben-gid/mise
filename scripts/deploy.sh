@@ -13,7 +13,7 @@
 # Once per machine:
 #   supabase login && supabase link --project-ref mpaulmfgrdnerbepehnt
 #   gcloud auth login
-# and server/.env holding SUPABASE_SECRET_KEY (and PEXELS_KEY,
+# and server/.env holding SUPABASE_SECRET_KEY (and UNSPLASH_ACCESS_KEY,
 # ANTHROPIC_API_KEY and REVENUECAT_SECRET_KEY, all optional), which become Secret Manager secrets the
 # first time they're missing. Once they exist, any machine can deploy without
 # the .env.
@@ -82,9 +82,9 @@ ensure_secret() {
 ensure_secret supabase-secret SUPABASE_SECRET_KEY ||
   die "Secret supabase-secret is missing and server/.env has no SUPABASE_SECRET_KEY."
 # Optional: without it /photos is a 503 the app reads as "no photos", and the
-# Wikipedia fallback carries on. Pexels wasn't issuing keys when this was written.
-ensure_secret pexels-key PEXELS_KEY ||
-  echo "No Pexels key: deploying without photo search."
+# Wikipedia fallback carries on.
+ensure_secret unsplash-key UNSPLASH_ACCESS_KEY ||
+  echo "No Unsplash key: deploying without photo search."
 # Optional too: without it /recipe is a 503, which the app reads as "not
 # available here", and pasting a recipe works as it always has.
 ensure_secret anthropic-key ANTHROPIC_API_KEY ||
