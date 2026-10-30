@@ -1369,40 +1369,65 @@ void main() {
       );
       await pumpUntil(
         tester,
-        () => find.text('Recipes that hold together').evaluate().isNotEmpty,
+        () => find.text('A photo for every recipe').evaluate().isNotEmpty,
       );
     });
     await tester.pumpAndSettle();
   }
 
-  testWidgets('the tour opens on first launch and Done leaves it', (
+  testWidgets('the tour opens on first launch and Done keeps the focaccia', (
     tester,
   ) async {
     await pumpFirstLaunch(tester);
-    expect(find.text('1 of 5'), findsOneWidget);
+    expect(find.text('Photo by Paula Berto on Unsplash'), findsWidgets);
 
-    for (final title in [
-      'Any size, any units',
-      'Import or Create',
-      'A photo for every recipe',
-      'Cook it, then note it',
-    ]) {
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+    expect(find.text('Any size, any units'), findsOneWidget);
+    // Landing doubles the loaf, so the amounts are seen to follow.
+    expect(find.text('2 loaves'), findsWidgets);
+    expect(find.text('800 ml'), findsOneWidget);
+
+    for (final title in ['Cook it, then note it', 'Your first recipe']) {
       await tester.tap(find.text('Next'));
       await tester.pumpAndSettle();
       expect(find.text(title), findsOneWidget);
     }
-    // No sign-in or Pro page under `flutter test`: the last page is the end.
+    // No server, sign-in or Pro under `flutter test`: no Create page, and the
+    // last page is the end.
     expect(find.text('Skip'), findsNothing);
+    expect(find.text('Write it'), findsNothing);
     // Back walks the pages rather than leaving.
     await tester.tap(find.byType(RoundBackButton));
     await tester.pumpAndSettle();
-    expect(find.text('A photo for every recipe'), findsOneWidget);
+    expect(find.text('Cook it, then note it'), findsOneWidget);
 
     await tester.tap(find.text('Next'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Done'));
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Done'));
+      // The list saves it and reloads, so its empty state is what goes.
+      await pumpUntil(
+        tester,
+        () => find.text('No recipes yet').evaluate().isEmpty,
+      );
+    });
     await tester.pumpAndSettle();
-    expect(find.text('No recipes yet'), findsOneWidget);
+    expect(find.text('Garlic Butter Focaccia'), findsOneWidget);
+    final saved = await tester.runAsync(store.loadAll);
+    expect(saved!.single.$2.imageUrls, ['mise://sample-focaccia.jpg']);
+    expect(store.imageFile('sample-focaccia.jpg').existsSync(), isTrue);
+  });
+
+  testWidgets('the stepper on the tour\'s card rescales it', (tester) async {
+    await pumpFirstLaunch(tester);
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('More'));
+    await tester.pumpAndSettle();
+    expect(find.text('3 loaves'), findsOneWidget);
+    expect(find.text('1200 ml'), findsOneWidget);
   });
 
   testWidgets('Skip leaves the tour from any page', (tester) async {
@@ -1423,7 +1448,7 @@ void main() {
 
     await tester.tap(find.text('How Mise works'));
     await tester.pumpAndSettle();
-    expect(find.text('Recipes that hold together'), findsOneWidget);
+    expect(find.text('A photo for every recipe'), findsOneWidget);
 
     await tester.tap(find.text('Skip'));
     await tester.pumpAndSettle();
@@ -1443,6 +1468,20 @@ void main() {
     expect(find.text('On every phone'), findsOneWidget);
     expect(find.text('Continue with Google'), findsOneWidget);
     expect(find.text('Not now'), findsOneWidget);
-    expect(find.text('Recipes that hold together'), findsNothing);
+    expect(find.text('A photo for every recipe'), findsNothing);
+  });
+
+  testWidgets('a replay from Settings explains and keeps nothing', (
+    tester,
+  ) async {
+    await tester.pumpWidget(MaterialApp(home: OnboardingScreen(store: store)));
+    await tester.pumpAndSettle();
+    for (var page = 0; page < 2; page++) {
+      await tester.tap(find.text('Next'));
+      await tester.pumpAndSettle();
+    }
+    expect(find.text('Cook it, then note it'), findsOneWidget);
+    expect(find.text('Done'), findsOneWidget);
+    expect(find.text('Your first recipe'), findsNothing);
   });
 }

@@ -426,8 +426,10 @@ limit, the same window code as `/photos`. No `ANTHROPIC_API_KEY` is a 503, the
 empty-`UNSPLASH_ACCESS_KEY` rule; on the phone, no accounts or no `PHOTO_PROXY` hides the
 controls (`serverRecipesOn`), so `flutter test` never shows them. Import's waits are
 a blocking `whileWriting` dialog and Create's are a line in its chat
-(`writeOrUpgrade(inline: true)`) — both an indefinite bar, which is fine only
-because tests never reach either. An adapted recipe saves through `saveVersion`, so the
+(`writeOrUpgrade(inline: true)`) — both `Writing` in
+[writing.dart](lib/recipe/ui/writing.dart): verbs in turn over a sweeping bar, picked
+for the dish by `verbsFor`'s keyword table (a wrong match costs only a blander verb, so
+no model). It animates forever, which is fine only because tests never reach it. An adapted recipe saves through `saveVersion`, so the
 history diff says what the model changed and Undo these changes takes it back.
 
 **Create asks before it writes, and the server keeps no conversation.** The list has
@@ -484,10 +486,25 @@ first time the cook returns to the list from a recipe (`showOwedOnboarding`), an
 marked `done` before they open. `main` reads the state and hands it to the list
 screen, which does no I/O for it — that is what keeps the existing widget tests,
 which never pass `onboarding:`, free of a tour. The sign-in page hides behind
-`accountsOn` and Pro behind `proOn`, so under `flutter test` the tour ends on its
-last explainer page; `OnboardingScreen`'s `accounts:`/`pro:` overrides exist only so
-a test can see the sign-in page. Pro is reached with `pushReplacement`, so back from
-the paywall lands on the list.
+`accountsOn` and Pro behind `proOn`; `OnboardingScreen`'s `accounts:`/`pro:` overrides
+exist only so a test can see the sign-in page. Pro is reached with `pushReplacement`,
+so back from the paywall lands on the list.
+
+**The tour is one card, and it ends on a recipe.** Each page is a `_Stage` with a title
+and one line; the card above the words is built from `_pages.page`, so it changes with
+the finger and there is no timer for `pumpAndSettle` to wait on. Each section is always
+in the tree and only folded away (`_reveal`), because its `TweenAnimationBuilder` —
+the doubled loaf, the stars — must keep its state to play once. The card is
+`sampleRecipe` ([recipe_sample.dart](lib/recipe/recipe_sample.dart)), real data
+through `amountLabel` and `contentParts`, so the tour can't show what the app doesn't
+do; it lives in code so it is there on the first frame, and `recipe_parser_test.dart`
+holds it to the schema. The last page is "Now you try" (`/recipe` from an idea,
+spending a try, waiting on that page) where `serverRecipesOn`, else "Your first
+recipe" — which is what `flutter test` sees. Only the first launch passes `parser:`,
+so Settings' replay explains and keeps nothing. The tour pops with the `Recipe` and the
+*list* saves it (`keepRecipe`, which copies the bundled photo in beside the recipes),
+after the paywall closes, then drops its tile in once. A fixed `created_at` keeps the
+sample's id fixed, so keeping it twice is one file.
 
 **No state management package and none wanted** — three screens over one store, plain
 `StatefulWidget` + `setState`, `Navigator.push` between them. The store and parser are

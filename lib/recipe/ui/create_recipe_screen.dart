@@ -8,6 +8,7 @@ import '../recipe_store.dart';
 import 'glass.dart';
 import 'import_recipe_screen.dart' show ErrorList;
 import 'pro_screen.dart' show writeOrUpgrade;
+import 'writing.dart';
 
 /// A recipe made up from a sentence, by the server, laid out as a chat: what
 /// the cook said and chose scrolls above, and one thing at a time sits at the
@@ -57,8 +58,9 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
   /// The option chosen per answered fork; answered and absent is "You pick".
   final _picked = <Fork, Option>{};
 
-  /// What is being waited on, shown as a line in the chat; null when idle.
-  String? _busy;
+  /// What is being waited on, as [Writing]'s verbs at the end of the chat;
+  /// null when idle.
+  List<String>? _busy;
   String? _failed;
   List<String> _errors = const [];
 
@@ -100,7 +102,7 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
     }
   });
 
-  void _wait(String busy) {
+  void _wait(List<String> busy) {
     setState(() {
       _busy = busy;
       _failed = null;
@@ -133,7 +135,7 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
     final second = _rounds.isNotEmpty;
     if (second) _keepNote();
     FocusScope.of(context).unfocus();
-    _wait('Thinking of questions…');
+    _wait(const ['Thinking of questions…']);
     final List<Fork> forks;
     try {
       forks = await askQuestions(_idea!, brief: second ? _brief : null);
@@ -164,14 +166,15 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
   Future<void> _create() async {
     _keepNote();
     FocusScope.of(context).unfocus();
-    _wait('Writing the recipe…');
     final text = _brief;
+    final verbs = verbsFor(text);
+    _wait(verbs);
     final Recipe recipe;
     try {
       recipe = widget.parser.parse(
         await writeOrUpgrade(
           context,
-          'Writing the recipe…',
+          verbs,
           () => askForRecipe(text: text),
           inline: true,
         ),
@@ -276,7 +279,8 @@ class _CreateRecipeScreenState extends State<CreateRecipeScreen> {
           case final answers when answers.isNotEmpty)
         _Answers(answers),
     ],
-    if (_busy case final busy?) _Said(busy, working: true),
+    if (_busy case final busy?)
+      Padding(padding: const EdgeInsets.only(bottom: 14), child: Writing(busy)),
     if (_failed case final failed?) _Said(failed, error: true),
     if (_errors.isNotEmpty)
       ErrorList(errors: _errors, tip: 'Try Create again.'),
@@ -376,14 +380,12 @@ class _Tinted extends StatelessWidget {
   );
 }
 
-/// mise's side: plain text on the page, the way a chat model answers, with a
-/// bar under it while [working].
+/// mise's side: plain text on the page, the way a chat model answers.
 class _Said extends StatelessWidget {
   final String text;
-  final bool working;
   final bool error;
 
-  const _Said(this.text, {this.working = false, this.error = false});
+  const _Said(this.text, {this.error = false});
 
   @override
   Widget build(BuildContext context) {
@@ -399,10 +401,6 @@ class _Said extends StatelessWidget {
               color: error ? theme.colorScheme.error : null,
             ),
           ),
-          if (working) ...[
-            const SizedBox(height: 10),
-            const SizedBox(width: 160, child: LinearProgressIndicator()),
-          ],
         ],
       ),
     );

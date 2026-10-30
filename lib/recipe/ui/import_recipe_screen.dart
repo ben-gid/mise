@@ -9,6 +9,7 @@ import '../recipe_parser.dart';
 import '../recipe_server.dart';
 import '../recipe_store.dart';
 import 'glass.dart';
+import 'writing.dart';
 import 'pro_screen.dart' show writeOrUpgrade;
 
 /// Paste JSON from an LLM, validate it, save it. Validation errors are shown
@@ -59,7 +60,7 @@ class _ImportRecipeScreenState extends State<ImportRecipeScreen> {
       _say('That isn\'t a link. To describe a dish, use Create.');
       return;
     }
-    await _fromServer('Reading the page…', () => askForRecipe(url: text));
+    await _fromServer(readingVerbs('page'), () => askForRecipe(url: text));
   }
 
   Future<void> _fromPhoto() async {
@@ -79,7 +80,7 @@ class _ImportRecipeScreenState extends State<ImportRecipeScreen> {
     if (picked == null) return;
     final bytes = await picked.readAsBytes();
     await _fromServer(
-      'Reading the photo…',
+      readingVerbs('photo'),
       () => askForRecipe(image: (photoType(picked!.name), bytes)),
     );
   }
@@ -87,13 +88,13 @@ class _ImportRecipeScreenState extends State<ImportRecipeScreen> {
   /// Runs [ask] behind [whileWriting], then treats what comes back like any
   /// paste: parsed by the phone's own validator before it is saved.
   Future<void> _fromServer(
-    String message,
+    List<String> verbs,
     Future<String> Function() ask,
   ) async {
     setState(() => _askErrors = const []);
     final Recipe recipe;
     try {
-      recipe = widget.parser.parse(await writeOrUpgrade(context, message, ask));
+      recipe = widget.parser.parse(await writeOrUpgrade(context, verbs, ask));
     } on RecipeValidationException catch (e) {
       if (mounted) setState(() => _askErrors = e.errors);
       return;
@@ -386,13 +387,12 @@ class ErrorList extends StatelessWidget {
   }
 }
 
-/// Holds the screen behind a progress dialog while [work] runs. Blocking on
+/// Holds the screen behind a [Writing] dialog while [work] runs. Blocking on
 /// purpose: a server recipe takes seconds, and nothing on the screen behind it
-/// means anything until it lands. The bar animates forever, so it is only ever
-/// up while a real request is out — never in a test, where the server is off.
+/// means anything until it lands.
 Future<T> whileWriting<T>(
   BuildContext context,
-  String message,
+  List<String> verbs,
   Future<T> Function() work,
 ) async {
   final navigator = Navigator.of(context, rootNavigator: true);
@@ -400,20 +400,8 @@ Future<T> whileWriting<T>(
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => PopScope(
-        canPop: false,
-        child: AlertDialog(
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(message),
-              const SizedBox(height: 16),
-              const LinearProgressIndicator(),
-            ],
-          ),
-        ),
-      ),
+      builder: (context) =>
+          PopScope(canPop: false, child: AlertDialog(content: Writing(verbs))),
     ),
   );
   try {

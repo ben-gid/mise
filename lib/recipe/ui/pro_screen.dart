@@ -14,11 +14,11 @@ import 'import_recipe_screen.dart' show whileWriting;
 /// [inline] skips the dialog, for a screen that shows its own progress.
 Future<String> writeOrUpgrade(
   BuildContext context,
-  String message,
+  List<String> verbs,
   Future<String> Function() ask, {
   bool inline = false,
 }) async {
-  Future<String> wait() => inline ? ask() : whileWriting(context, message, ask);
+  Future<String> wait() => inline ? ask() : whileWriting(context, verbs, ask);
   try {
     return await wait();
   } on OutOfTriesException {

@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mise/recipe/recipe_models.dart';
 import 'package:mise/recipe/recipe_parser.dart';
+import 'package:mise/recipe/recipe_sample.dart';
+import 'package:mise/recipe/ui/writing.dart';
 
 void main() {
   final parser = RecipeParser(File(recipeSchemaAsset).readAsStringSync());
@@ -18,6 +20,25 @@ void main() {
     mutate(map);
     return jsonEncode(map);
   }
+
+  test('the tour\'s sample recipe passes the validator', () {
+    expect(
+      parser.parse(jsonEncode(sampleRecipe.toJson())).title,
+      sampleRecipe.title,
+    );
+  });
+
+  test(
+    'writing verbs follow the dish, and anything else gets the general list',
+    () {
+      expect(verbsFor('A mango smoothie'), contains('Blending…'));
+      expect(
+        verbsFor('chocolate hazelnut mousse cake'),
+        contains('Laminating…'),
+      );
+      expect(verbsFor('something nice'), contains('Plating…'));
+    },
+  );
 
   List<String> errorsOf(String json) {
     try {

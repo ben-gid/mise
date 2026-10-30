@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import '../recipe_image.dart';
 import '../recipe_models.dart';
 import '../recipe_parser.dart';
+import '../recipe_sample.dart';
 import '../recipe_scaling.dart' show baseCount, countLabel;
 import '../recipe_server.dart' show serverRecipesOn;
 import '../recipe_store.dart';
@@ -50,6 +51,9 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
 
   late bool _owed = widget.onboarding == 'skipped';
 
+  /// The tour's recipe, which drops into its tile the first time it shows.
+  String? _dropped;
+
   // Another phone's recipes, landed by sync.
   @override
   void initState() {
@@ -60,12 +64,22 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
     }
   }
 
+  /// The recipe the tour ended on, landing in the list — after the paywall,
+  /// which is what the tour's push waits for when it opens one.
   Future<void> _tour() async {
-    final seen = await Navigator.push<bool>(
+    final seen = await Navigator.push<Object?>(
       context,
-      MaterialPageRoute(builder: (_) => OnboardingScreen(store: widget.store)),
+      MaterialPageRoute(
+        builder: (_) =>
+            OnboardingScreen(store: widget.store, parser: widget.parser),
+      ),
     );
-    _owed = seen != true && widget.onboarding == 'new';
+    _owed = seen == null;
+    if (seen is! Recipe) return;
+    final id = await keepRecipe(widget.store, seen);
+    if (!mounted) return;
+    _dropped = id;
+    _reload();
   }
 
   @override
@@ -277,13 +291,16 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
     // ~170dp — the size a title still wraps to two lines in.
     final columns = ((width - 32) / 220).floor().clamp(2, 5);
 
-    Widget tile(SavedRecipe saved) => _Tile(
-      saved: saved,
-      stars: headlineStars(library.log[saved.$1] ?? const []),
-      store: widget.store,
-      onTap: () => _open(saved),
-      onDelete: () => _delete(saved),
-    );
+    Widget tile(SavedRecipe saved) {
+      final tile = _Tile(
+        saved: saved,
+        stars: headlineStars(library.log[saved.$1] ?? const []),
+        store: widget.store,
+        onTap: () => _open(saved),
+        onDelete: () => _delete(saved),
+      );
+      return saved.$1 == _dropped ? _DropIn(child: tile) : tile;
+    }
 
     return CustomScrollView(
       // A short library still has to pull.
@@ -667,6 +684,30 @@ class _CoverState extends State<_Cover> {
     }
     return _chain?.winnerFromSearch?.credit.name;
   }
+}
+
+/// Falls into place once, a beat after it is first built: long enough for
+/// the route above it to have slid away.
+class _DropIn extends StatelessWidget {
+  final Widget child;
+  const _DropIn({required this.child});
+
+  @override
+  Widget build(BuildContext context) => TweenAnimationBuilder<double>(
+    tween: Tween(begin: 0, end: 1),
+    duration: MediaQuery.disableAnimationsOf(context)
+        ? Duration.zero
+        : const Duration(milliseconds: 1100),
+    curve: const Interval(0.3, 1, curve: Curves.easeOutBack),
+    builder: (context, t, child) => Opacity(
+      opacity: t.clamp(0.0, 1.0),
+      child: Transform.translate(
+        offset: Offset(0, -80 * (1 - t)),
+        child: Transform.scale(scale: 0.9 + 0.1 * t, child: child),
+      ),
+    ),
+    child: child,
+  );
 }
 
 class _EmptyState extends StatelessWidget {

@@ -16,6 +16,7 @@ import '../recipe_sync.dart';
 import '../recipe_timers.dart';
 import 'cook_log.dart';
 import 'glass.dart';
+import 'writing.dart' show verbsFor;
 import 'pro_screen.dart' show writeOrUpgrade;
 import 'recipe_edit_screen.dart';
 import 'recipe_history_screen.dart';
@@ -356,11 +357,10 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
     final Recipe recipe;
     try {
       recipe = widget.parser.parse(
-        await writeOrUpgrade(
-          context,
+        await writeOrUpgrade(context, [
           'Changing the recipe…',
-          () => askForRecipe(text: change, base: _recipe.toJson()),
-        ),
+          ...verbsFor(change),
+        ], () => askForRecipe(text: change, base: _recipe.toJson())),
       );
     } on RecipeValidationException catch (e) {
       final count = e.errors.length;

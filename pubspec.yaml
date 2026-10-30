@@ -114,6 +114,7 @@ flutter:
   assets:
     - assets/schemas/recipe_schema.json
     - assets/prompts/recipe.md
+    - assets/samples/focaccia.jpg
 
   # Instrument Serif ships one weight in two styles; Geist is variable (wght),
   # so its weights are set with FontVariation in glass.dart.
