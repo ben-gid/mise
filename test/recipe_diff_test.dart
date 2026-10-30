@@ -277,8 +277,7 @@ void main() {
 
   test('giving a recipe loaves reads as what it makes', () {
     final after = edited(
-      (json) =>
-          json['makes'] = {'amount': 2, 'one': 'loaf', 'other': 'loaves'},
+      (json) => json['makes'] = {'amount': 2, 'one': 'loaf', 'other': 'loaves'},
     );
     expect(diffRecipes(original(), after), [
       (

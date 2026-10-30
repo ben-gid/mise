@@ -127,9 +127,10 @@ void main() {
       // Same list, one lookup: the hero takes the first and the picker shows
       // all of them, off a single request.
       final photos = await stockPhotos('seeded query');
-      expect([for (final photo in photos) photo.url], [
-        'https://a.example/1.jpg',
-      ]);
+      expect(
+        [for (final photo in photos) photo.url],
+        ['https://a.example/1.jpg'],
+      );
     });
   });
 
@@ -230,7 +231,9 @@ void main() {
         chain.resolve(ImageConfiguration.empty);
         // Until it has decoded, not until it is named: winner is optimistic,
         // and keeping a photo waits on the real thing.
-        await pumpUntil(() => chain.winnerFromSearch != null || chain.exhausted);
+        await pumpUntil(
+          () => chain.winnerFromSearch != null || chain.exhausted,
+        );
       });
 
       expect(chain.winner, 'mise://found.png');
