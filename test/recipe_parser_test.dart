@@ -80,6 +80,14 @@ void main() {
     expect(errors.single, contains('integer'));
   });
 
+  test('a half-filled makes names where it is', () {
+    final errors = errorsOf(
+      mutated((r) => r['makes'] = {'amount': 2, 'one': 'loaf', 'other': ''}),
+    );
+    expect(errors.join('\n'), contains('makes'));
+    printOnFailure(errors.join('\n'));
+  });
+
   test('malformed ingredient id fails the 4-char pattern', () {
     final errors = errorsOf(
       mutated((r) => (r['ingredients'] as List)[0]['id'] = '1'),

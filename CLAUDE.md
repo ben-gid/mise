@@ -91,6 +91,22 @@ substitutes them at render time with amounts scaled by the servings stepper. JSO
 can't express cross-references, so `RecipeParser` adds a post-validation pass rejecting
 `{id}` refs that don't resolve — a dangling ref would silently break scaling.
 
+In a step, each reference renders in the accent and semibold, amount and name alike, so `contentParts` hands the screen prose and references apart, and
+`renderContent` joins them back into the plain string sharing needs.
+
+**A loaf is counted in loaves, and still feeds people.** `base_servings` stays required
+on every recipe; `makes` (`{amount, one, other}`, optional) is added for things a cook
+counts out — loaves, tarts, milkshakes — with both noun forms because English plurals
+don't follow a rule. When it is set the stepper counts *it* (`baseCount`), and servings
+follow as a label ("Makes · serves 12"), hidden below one person. A cook log entry keeps
+the stepper's number in `servings` and reads it with the recipe's noun ("Made 3
+loaves"), so no stored data changed shape. It is `anyOf [$ref, null]` in the schema
+rather than a nullable object type, because the server's `any_of` rewrite would leave
+an object's `properties` beside an `anyOf`; and it is required for the model, like
+`notes`, so a written bread is never left counted in servings. The validator's
+`anyOf violated` is unreadable, which is why the editor checks a half-filled Makes
+itself.
+
 **Nobody types `{0001}`, so the editor round-trips ids through names — and that
 round-trip has to be lossless.** `toDisplayRefs` renders a step as
 `Whisk [bread flour]` on open and `toIdRefs` converts back on save. Both key off

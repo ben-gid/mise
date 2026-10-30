@@ -49,7 +49,8 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
   late String _id = widget.id;
   late Recipe _recipe = widget.recipe;
 
-  late int _servings = widget.recipe.baseServings;
+  /// What the stepper shows: servings, or loaves for a recipe that makes them.
+  late int _servings = baseCount(widget.recipe);
 
   /// Ingredients tapped into their other dimension. Deliberately not
   /// persisted — this is "my scale is dirty, show me cups", not a preference.
@@ -123,7 +124,8 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
               note: '',
             ),
         isNew: existing == null,
-        fallbackServings: _recipe.baseServings,
+        fallbackServings: baseCount(_recipe),
+        makes: _recipe.makes,
         accent: Theme.of(context).colorScheme.primary,
       ),
     );
@@ -314,6 +316,11 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
   /// screen would imply this version had already been cooked.
   void _adopt(SavedRecipe saved) {
     setState(() {
+      // An edit that gave it loaves, or changed how many, leaves the old
+      // count meaning something else.
+      if (baseCount(saved.$2) != baseCount(_recipe)) {
+        _servings = baseCount(saved.$2);
+      }
       _id = saved.$1;
       _recipe = saved.$2;
       _entries = const [];
@@ -461,6 +468,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
                   ],
                   const SizedBox(height: 18),
                   _Facts(
+                    recipe: recipe,
                     servings: _servings,
                     onServings: (value) => setState(() => _servings = value),
                     timed: timed,
@@ -556,7 +564,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
                       timer: timerKey(_id, step.id),
                       recipeTitle: recipe.title,
                       last: index == recipe.steps.length - 1,
-                      text: renderContent(
+                      parts: contentParts(
                         step,
                         recipe,
                         factor,
@@ -574,6 +582,7 @@ class _RecipeDetailScreenState extends State<RecipeDetailScreen>
             SliverToBoxAdapter(
               child: _CookLog(
                 entries: _entries,
+                makes: recipe.makes,
                 source: recipe.source,
                 onAdd: _logCook,
                 onEdit: _logCook,
@@ -871,10 +880,8 @@ class _PhotographerCredit extends StatelessWidget {
       context,
     ).textTheme.labelSmall?.copyWith(color: ink, letterSpacing: 0.6);
     Widget link(String text, String url) => TextButton(
-      onPressed: () => launchUrl(
-        Uri.parse(url),
-        mode: LaunchMode.externalApplication,
-      ),
+      onPressed: () =>
+          launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication),
       style: TextButton.styleFrom(
         foregroundColor: ink,
         padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -998,6 +1005,7 @@ class _HeadnoteState extends State<_Headnote> {
 /// The strip under the headnote: how many it serves (and the control that
 /// changes it), how long the timed steps add up to, and how it has gone.
 class _Facts extends StatelessWidget {
+  final Recipe recipe;
   final int servings;
   final ValueChanged<int> onServings;
 
@@ -1006,6 +1014,7 @@ class _Facts extends StatelessWidget {
   final List<CookEntry> entries;
 
   const _Facts({
+    required this.recipe,
     required this.servings,
     required this.onServings,
     required this.timed,
@@ -1047,7 +1056,28 @@ class _Facts extends StatelessWidget {
       child: IntrinsicHeight(
         child: Row(
           children: [
-            cell('Serves', _Stepper(value: servings, onChanged: onServings)),
+            switch (recipe.makes) {
+              null => cell(
+                'Serves',
+                _Stepper(value: servings, onChanged: onServings),
+              ),
+              final makes => cell(
+                switch (servesAt(recipe, servings)) {
+                  final serves? => 'Makes · serves $serves',
+                  null => 'Makes',
+                },
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _Stepper(value: servings, onChanged: onServings),
+                    Text(
+                      makes.noun(servings),
+                      style: theme.textTheme.bodyLarge,
+                    ),
+                  ],
+                ),
+              ),
+            },
             if (timed > 0) ...[
               divider(),
               Expanded(
@@ -1302,7 +1332,7 @@ class _StepRow extends StatelessWidget {
   final bool last;
 
   /// The step's words with every `{0001}` already scaled and spelled out.
-  final String text;
+  final List<({String? amount, String text})> parts;
 
   /// Its [timerKey], and the recipe's name for the notification.
   final String timer;
@@ -1312,7 +1342,7 @@ class _StepRow extends StatelessWidget {
     required this.number,
     required this.step,
     required this.last,
-    required this.text,
+    required this.parts,
     required this.timer,
     required this.recipeTitle,
   });
@@ -1321,6 +1351,10 @@ class _StepRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    final strong = weighted(
+      theme.textTheme.bodyLarge,
+      FontWeight.w600,
+    )?.copyWith(color: scheme.primary);
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 14),
       decoration: BoxDecoration(
@@ -1345,7 +1379,28 @@ class _StepRow extends StatelessWidget {
               children: [
                 Text(step.title, style: theme.textTheme.titleMedium),
                 const SizedBox(height: 4),
-                Text(text, style: theme.textTheme.bodyLarge),
+                // Each ingredient in the accent and in weight, amount and name
+                // alike, so a step can be read for what goes in at a glance.
+                Text.rich(
+                  TextSpan(
+                    children: [
+                      for (final part in parts)
+                        if (part.amount case final amount?) ...[
+                          TextSpan(
+                            text: amount,
+                            style: strong?.copyWith(
+                              fontFeatures: const [
+                                FontFeature.tabularFigures(),
+                              ],
+                            ),
+                          ),
+                          TextSpan(text: ' ${part.text}', style: strong),
+                        ] else
+                          TextSpan(text: part.text),
+                    ],
+                  ),
+                  style: theme.textTheme.bodyLarge,
+                ),
                 if (step.timerSeconds case final seconds?) ...[
                   const SizedBox(height: 10),
                   _StepTimer(
@@ -1485,12 +1540,14 @@ class _StepTimerState extends State<_StepTimer> {
 /// just finished making it.
 class _CookLog extends StatefulWidget {
   final List<CookEntry> entries;
+  final Makes? makes;
   final String source;
   final VoidCallback onAdd;
   final ValueChanged<CookEntry> onEdit;
 
   const _CookLog({
     required this.entries,
+    required this.makes,
     required this.source,
     required this.onAdd,
     required this.onEdit,
@@ -1550,7 +1607,11 @@ class _CookLogState extends State<_CookLog> {
               const SizedBox(height: 12),
               for (final entry
                   in _showAll ? entries : entries.take(_collapsed)) ...[
-                CookEntryLine(entry: entry, onTap: () => widget.onEdit(entry)),
+                CookEntryLine(
+                  entry: entry,
+                  makes: widget.makes,
+                  onTap: () => widget.onEdit(entry),
+                ),
                 const SizedBox(height: 8),
               ],
               if (entries.length > _collapsed)
@@ -1597,12 +1658,16 @@ class _EntryDialog extends StatefulWidget {
   /// What the stepper shows for an entry migrated without servings. Left
   /// untouched, the entry stays without them rather than claiming a number.
   final int fallbackServings;
+
+  /// The recipe's pieces, when the count is loaves rather than servings.
+  final Makes? makes;
   final Color accent;
 
   const _EntryDialog({
     required this.entry,
     required this.isNew,
     required this.fallbackServings,
+    required this.makes,
     required this.accent,
   });
 
@@ -1730,7 +1795,10 @@ class _EntryDialogState extends State<_EntryDialog> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Served', style: label),
+                      Text(switch (widget.makes) {
+                        final makes? => 'Made (${makes.other})',
+                        null => 'Served',
+                      }, style: label),
                       _Stepper(
                         value: _servings ?? widget.fallbackServings,
                         onChanged: (value) => setState(() => _servings = value),

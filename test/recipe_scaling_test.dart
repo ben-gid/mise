@@ -73,6 +73,47 @@ void main() {
     expect(text, isNot(contains('{')));
   });
 
+  group('a recipe that makes loaves', () {
+    final loaves = parser.parse(
+      File('test/fixtures/valid/makes_loaves.json').readAsStringSync(),
+    ); // 2 loaves, serves 4
+
+    test('scales by the loaf, with the servings following', () {
+      final flour = loaves.ingredientById('0001')!;
+      expect(baseCount(loaves), 2);
+      expect(amountLabel(flour, scaleFactor(loaves, 4)), '1000 g');
+      expect(countLabel(loaves, 1), '1 loaf');
+      expect(yieldLine(loaves, 3), 'Makes 3 loaves · serves 6');
+    });
+
+    test('says nothing about servings below one person', () {
+      final cookies = Recipe.fromJson({
+        ...loaves.toJson(),
+        'makes': {'amount': 24, 'one': 'cookie', 'other': 'cookies'},
+      });
+      expect(yieldLine(cookies, 1), 'Makes 1 cookie');
+    });
+
+    test('a recipe without one counts servings as before', () {
+      expect(countLabel(recipe, 1), '1 serving');
+      expect(yieldLine(recipe, 4), 'Serves 4');
+    });
+  });
+
+  test('step content splits into prose and scaled references', () {
+    final step = RecipeStep(
+      id: 's9',
+      title: 'Mix',
+      content: 'Whisk {0001} with {9999}.',
+      timerSeconds: null,
+    );
+    expect(contentParts(step, recipe, 2), [
+      (amount: null, text: 'Whisk '),
+      (amount: '1000 g', text: 'bread flour'),
+      (amount: null, text: ' with {9999}.'),
+    ]);
+  });
+
   test('formats timer durations', () {
     expect(formatDuration(45), '45 s');
     expect(formatDuration(1500), '25 min');

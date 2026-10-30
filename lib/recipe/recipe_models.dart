@@ -86,10 +86,35 @@ class ImageCredit {
   Map<String, dynamic> toJson() => _$ImageCreditToJson(this);
 }
 
+/// What a recipe makes when it comes in pieces: 2 loaves, 24 cookies. Both
+/// nouns are written out because English plurals don't follow a rule the app
+/// could apply — loaf, loaves.
+@JsonSerializable()
+class Makes {
+  final int amount;
+  final String one;
+  final String other;
+
+  const Makes({required this.amount, required this.one, required this.other});
+
+  String noun(int count) => count == 1 ? one : other;
+
+  factory Makes.fromJson(Map<String, dynamic> json) => _$MakesFromJson(json);
+  Map<String, dynamic> toJson() => _$MakesToJson(this);
+}
+
 @JsonSerializable(fieldRename: FieldRename.snake, explicitToJson: true)
 class Recipe {
   final String title;
+
+  /// How many it feeds. Always set, even where [makes] is what the stepper
+  /// counts — it is what "serves 12" beside "2 loaves" is worked out from.
   final int baseServings;
+
+  /// Pieces the recipe makes, null for soup and anything else served by the
+  /// bowl. When set, the servings stepper counts these instead. Optional for
+  /// the reason every later field is: required would brick recipes on disk.
+  final Makes? makes;
   final List<Ingredient> ingredients;
   final List<RecipeStep> steps;
 
@@ -139,6 +164,7 @@ class Recipe {
   const Recipe({
     required this.title,
     required this.baseServings,
+    this.makes,
     required this.ingredients,
     required this.steps,
     this.notes,

@@ -344,7 +344,11 @@ class _VersionCard extends StatelessWidget {
                     ),
                     for (final (i, entry) in entries.indexed) ...[
                       if (i > 0) const SizedBox(height: 6),
-                      CookEntryLine(entry: entry, accent: accent),
+                      CookEntryLine(
+                        entry: entry,
+                        makes: version.saved.$2.makes,
+                        accent: accent,
+                      ),
                     ],
                   ],
                 ),

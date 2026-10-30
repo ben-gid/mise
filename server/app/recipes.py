@@ -76,8 +76,9 @@ def _model_schema() -> dict:
     # Optional to the validator, so recipes saved before them still load, but
     # never to the model: under constrained decoding an optional field is one
     # it may skip, and a written recipe came back with neither — no headnote,
-    # nothing for the photo search. Both can still be null.
-    schema["required"] = [*schema["required"], "notes", "image_query"]
+    # nothing for the photo search. All can still be null. `makes` the same
+    # way: asked every time, so a loaf is never left counted in servings.
+    schema["required"] = [*schema["required"], "notes", "image_query", "makes"]
 
     def any_of(node: Any) -> Any:
         if isinstance(node, list):

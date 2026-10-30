@@ -610,6 +610,25 @@ void main() {
     expect(find.textContaining('{0001}'), findsNothing);
   });
 
+  testWidgets('a recipe that makes loaves steps by the loaf', (tester) async {
+    final json = jsonEncode({
+      ...(jsonDecode(validJson) as Map<String, dynamic>),
+      'makes': {'amount': 1, 'one': 'loaf', 'other': 'loaves'},
+    });
+    tallSurface(tester);
+    await pumpDetail(tester, json: json);
+
+    expect(find.text('Makes · serves 4'), findsOneWidget);
+    expect(find.text('loaf'), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.add));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Makes · serves 8'), findsOneWidget);
+    expect(find.text('loaves'), findsOneWidget);
+    expect(find.text('1000 g'), findsOneWidget);
+  });
+
   testWidgets('detail screen honours the unit settings', (tester) async {
     weightSystem.value = UnitSystem.imperial;
     volumeSystem.value = UnitSystem.imperial;

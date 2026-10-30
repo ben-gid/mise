@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../recipe_models.dart';
 import '../recipe_store.dart';
 
 /// "17 Oct 2026" — local time, since it is the user's own cook or edit.
@@ -55,6 +56,9 @@ class StarsRow extends StatelessWidget {
 class CookEntryLine extends StatelessWidget {
   final CookEntry entry;
 
+  /// The recipe's pieces, so a count of loaves reads as loaves.
+  final Makes? makes;
+
   /// The stars' colour; the theme's accent when not given.
   final Color? accent;
   final VoidCallback? onTap;
@@ -62,6 +66,7 @@ class CookEntryLine extends StatelessWidget {
   const CookEntryLine({
     super.key,
     required this.entry,
+    this.makes,
     this.accent,
     this.onTap,
   });
@@ -128,7 +133,16 @@ class CookEntryLine extends StatelessWidget {
                           Text('No stars', style: muted),
                         const Spacer(),
                         if (servings != null)
-                          Text('Served $servings', style: muted),
+                          Text(
+                            // The entry keeps the stepper's number, so on a
+                            // recipe that makes loaves it counts loaves.
+                            switch (makes) {
+                              final makes? =>
+                                'Made $servings ${makes.noun(servings)}',
+                              null => 'Served $servings',
+                            },
+                            style: muted,
+                          ),
                       ],
                     ),
                     if (entry.note.isNotEmpty)

@@ -3,6 +3,7 @@ Write a recipe as JSON for the mise recipe app. It is checked against this JSON 
 {schema}
 
 Rules:
+- base_servings is how many people it feeds. When the recipe makes pieces a cook counts — loaves, cakes, tarts, cookies, milkshakes — also set makes to how many and the noun both ways: {"amount": 2, "one": "loaf", "other": "loaves"}. Leave makes null for soups, stews, pasta and anything else served by the bowl or plate.
 - Ingredient ids are 4 digits ("0001", "0002", …).
 - Fold counting nouns into the ingredient name for whole items ("garlic cloves") and set their unit to null.
 - Give each ingredient a name distinct from the others. Where the same thing appears in two components, say which: "caster sugar (sponge)" and "caster sugar (buttercream)", not "caster sugar" twice.

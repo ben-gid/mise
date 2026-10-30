@@ -275,6 +275,22 @@ void main() {
     ]);
   });
 
+  test('giving a recipe loaves reads as what it makes', () {
+    final after = edited(
+      (json) =>
+          json['makes'] = {'amount': 2, 'one': 'loaf', 'other': 'loaves'},
+    );
+    expect(diffRecipes(original(), after), [
+      (
+        kind: ChangeKind.servings,
+        label: 'Makes',
+        detail: null,
+        before: null,
+        after: '2 loaves',
+      ),
+    ]);
+  });
+
   test('a photo arriving is a change, not a silent one', () {
     final after = edited(
       (json) => json['image_urls'] = ['https://example.com/new.jpg'],

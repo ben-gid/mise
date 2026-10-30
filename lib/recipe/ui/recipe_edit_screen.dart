@@ -56,6 +56,9 @@ enum _UnusedAction { edit, remove, save }
 class _RecipeEditScreenState extends State<RecipeEditScreen> {
   final _title = TextEditingController();
   final _servings = TextEditingController();
+  final _makes = TextEditingController();
+  final _makesOne = TextEditingController();
+  final _makesOther = TextEditingController();
   final _tags = TextEditingController();
   final _notes = TextEditingController();
   final _imageUrls = TextEditingController();
@@ -82,6 +85,9 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
   void dispose() {
     _title.dispose();
     _servings.dispose();
+    _makes.dispose();
+    _makesOne.dispose();
+    _makesOther.dispose();
     _tags.dispose();
     _notes.dispose();
     _imageUrls.dispose();
@@ -104,6 +110,9 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
   void _load(Recipe recipe) {
     _title.text = recipe.title;
     _servings.text = '${recipe.baseServings}';
+    _makes.text = '${recipe.makes?.amount ?? ''}';
+    _makesOne.text = recipe.makes?.one ?? '';
+    _makesOther.text = recipe.makes?.other ?? '';
     _tags.text = recipe.tags.join(', ');
     _notes.text = recipe.notes ?? '';
     // One per line rather than comma-separated like tags: commas are legal
@@ -198,6 +207,7 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
       title: _title.text.trim(),
       baseServings:
           int.tryParse(_servings.text.trim()) ?? widget.recipe.baseServings,
+      makes: _draftMakes(),
       ingredients: ingredients,
       steps: [
         for (final draft in _steps)
@@ -228,6 +238,15 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
       source: widget.recipe.source,
       createdAt: widget.recipe.createdAt,
     );
+  }
+
+  /// Null when all three are blank. Half filled in is still a [Makes], so
+  /// [_save] reports it instead of the form quietly dropping it.
+  Makes? _draftMakes() {
+    final one = _makesOne.text.trim(), other = _makesOther.text.trim();
+    final amount = _makes.text.trim();
+    if (amount.isEmpty && one.isEmpty && other.isEmpty) return null;
+    return Makes(amount: int.tryParse(amount) ?? 0, one: one, other: other);
   }
 
   /// The label each ingredient is currently referred to by in step text.
@@ -411,6 +430,14 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
           else
             'Step ${number + 1} mentions [$unknown], which is not an '
                 'ingredient.',
+      // The validator would say this as "anyOf violated".
+      if (!_jsonMode &&
+          switch (_draftMakes()) {
+            final m? => m.amount < 1 || m.one.isEmpty || m.other.isEmpty,
+            null => false,
+          })
+        'Makes needs a number and both words — 2, loaf, loaves — or leave '
+            'all three blank.',
     ];
     if (problems.isNotEmpty) {
       setState(() => _errors = problems);
@@ -590,6 +617,45 @@ class _RecipeEditScreenState extends State<RecipeEditScreen> {
             decoration: const InputDecoration(
               labelText: 'Tags',
               helperText: 'Commas between',
+            ),
+          ),
+        ),
+      ],
+    ),
+    const SizedBox(height: 12),
+    // Blank for soup. Filled in, the stepper counts these instead of servings.
+    Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 104,
+          child: TextField(
+            controller: _makes,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            decoration: const InputDecoration(
+              labelText: 'Makes',
+              hintText: '2',
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: TextField(
+            controller: _makesOne,
+            decoration: const InputDecoration(
+              labelText: 'One',
+              hintText: 'loaf',
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: TextField(
+            controller: _makesOther,
+            decoration: const InputDecoration(
+              labelText: 'Many',
+              hintText: 'loaves',
             ),
           ),
         ),

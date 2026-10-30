@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import '../recipe_image.dart';
 import '../recipe_models.dart';
 import '../recipe_parser.dart';
+import '../recipe_scaling.dart' show baseCount, countLabel;
 import '../recipe_server.dart' show serverRecipesOn;
 import '../recipe_store.dart';
 import '../recipe_sync.dart';
@@ -367,8 +368,7 @@ InlineSpan _meta(BuildContext context, List<String> parts, int stars) {
   );
 }
 
-String _servings(Recipe recipe) =>
-    '${recipe.baseServings} ${recipe.baseServings == 1 ? 'serving' : 'servings'}';
+String _servings(Recipe recipe) => countLabel(recipe, baseCount(recipe));
 
 /// One recipe in the grid: its photo, its name, a line about it.
 class _Tile extends StatelessWidget {

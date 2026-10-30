@@ -15,7 +15,15 @@
   ],
   "properties": {
     "title": { "type": "string", "minLength": 1 },
-    "base_servings": { "type": "integer", "minimum": 1 },
+    "base_servings": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "How many people it feeds, always \u2014 a loaf too."
+    },
+    "makes": {
+      "anyOf": [{ "$ref": "#/definitions/makes" }, { "type": "null" }],
+      "description": "What it makes, when it comes in pieces a cook counts out \u2014 loaves, cakes, tarts, cookies, milkshakes: how many, and the noun singular and plural, e.g. {\"amount\": 2, \"one\": \"loaf\", \"other\": \"loaves\"}. The app scales the recipe by this count instead of by servings, so it is the number a cook would double. Null for food served by the bowl or plate \u2014 soups, stews, pasta, salads."
+    },
     "ingredients": {
       "type": "array",
       "minItems": 1,
@@ -59,6 +67,16 @@
     "created_at": { "type": "string", "format": "date-time" }
   },
   "definitions": {
+    "makes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["amount", "one", "other"],
+      "properties": {
+        "amount": { "type": "integer", "minimum": 1 },
+        "one": { "type": "string", "minLength": 1 },
+        "other": { "type": "string", "minLength": 1 }
+      }
+    },
     "ingredient": {
       "type": "object",
       "additionalProperties": false,

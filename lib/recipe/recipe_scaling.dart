@@ -13,7 +13,7 @@ export 'recipe_units.dart'
         unitConverts,
         unitLabel;
 
-/// Scales ingredient amounts by servings and renders `{0001}` references in
+/// Scales ingredient amounts by servings (or loaves) and renders `{0001}` references in
 /// step content. No widgets, so they test directly — though the display units
 /// come from the notifiers in recipe_units.dart, which a test can set.
 
@@ -35,44 +35,89 @@ String amountLabel(Ingredient ingredient, double factor, {bool flip = false}) {
         );
 }
 
-double scaleFactor(Recipe recipe, int servings) =>
-    servings / recipe.baseServings;
+/// What the servings stepper counts from: the pieces a recipe makes when it
+/// makes any — you double bread by the loaf — and the servings otherwise.
+int baseCount(Recipe recipe) => recipe.makes?.amount ?? recipe.baseServings;
+
+double scaleFactor(Recipe recipe, int count) => count / baseCount(recipe);
+
+/// "2 loaves", or "4 servings" for a recipe that makes no pieces.
+String countLabel(Recipe recipe, int count) => switch (recipe.makes) {
+  final makes? => '$count ${makes.noun(count)}',
+  null => '$count ${count == 1 ? 'serving' : 'servings'}',
+};
+
+/// How many [count] feeds, rounded — or null under one person, which is
+/// what a single one of 24 cookies works out to.
+int? servesAt(Recipe recipe, int count) {
+  final serves = (recipe.baseServings * scaleFactor(recipe, count)).round();
+  return serves < 1 ? null : serves;
+}
+
+/// "Serves 4", or "Makes 2 loaves · serves 12".
+String yieldLine(Recipe recipe, int count) {
+  if (recipe.makes == null) return 'Serves $count';
+  final serves = servesAt(recipe, count);
+  return 'Makes ${countLabel(recipe, count)}'
+      '${serves == null ? '' : ' · serves $serves'}';
+}
 
 final _refPattern = RegExp(r'\{(\w+)\}');
 
-/// Replaces each `{0001}` with the scaled "750 g bread flour". Unknown ids are
+/// A step's words cut at each `{0001}`: prose runs with a null [amount], and
+/// each reference as its scaled amount and the ingredient's name, so the
+/// screen can set the two apart from the prose around them. Unknown ids are
 /// left as written — import already rejects those, this covers edited files.
-String renderContent(
+List<({String? amount, String text})> contentParts(
   RecipeStep step,
   Recipe recipe,
   double factor, {
   Set<String> flipped = const {},
 }) {
-  return step.content.replaceAllMapped(_refPattern, (match) {
+  final parts = <({String? amount, String text})>[];
+  var at = 0;
+  for (final match in _refPattern.allMatches(step.content)) {
     final ingredient = recipe.ingredientById(match[1]!);
-    if (ingredient == null) return match[0]!;
-    final label = amountLabel(
-      ingredient,
-      factor,
-      flip: flipped.contains(ingredient.id),
-    );
-    return '$label ${ingredient.name}';
-  });
+    if (ingredient == null) continue;
+    parts.add((amount: null, text: step.content.substring(at, match.start)));
+    parts.add((
+      amount: amountLabel(
+        ingredient,
+        factor,
+        flip: flipped.contains(ingredient.id),
+      ),
+      text: ingredient.name,
+    ));
+    at = match.end;
+  }
+  parts.add((amount: null, text: step.content.substring(at)));
+  return parts;
 }
 
-/// Plain text for sharing, scaled to [servings] — same numbers the screen is
+/// Replaces each `{0001}` with the scaled "750 g bread flour".
+String renderContent(
+  RecipeStep step,
+  Recipe recipe,
+  double factor, {
+  Set<String> flipped = const {},
+}) => [
+  for (final part in contentParts(step, recipe, factor, flipped: flipped))
+    part.amount == null ? part.text : '${part.amount} ${part.text}',
+].join();
+
+/// Plain text for sharing, scaled to [count] — same numbers the screen is
 /// showing. Ingredient refs are already resolved by [renderContent], so the
 /// text reads as prose with no `{0001}` left in it.
 String formatForSharing(
   Recipe recipe,
-  int servings, {
+  int count, {
   Set<String> flipped = const {},
 }) {
-  final factor = scaleFactor(recipe, servings);
+  final factor = scaleFactor(recipe, count);
   return [
     recipe.title,
     if (recipe.notes case final notes? when notes.isNotEmpty) '\n$notes',
-    '\nServes $servings',
+    '\n${yieldLine(recipe, count)}',
     '\nIngredients',
     for (final ingredient in recipe.ingredients)
       '- ${amountLabel(ingredient, factor, flip: flipped.contains(ingredient.id))}'

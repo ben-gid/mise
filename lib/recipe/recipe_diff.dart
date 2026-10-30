@@ -72,6 +72,12 @@ Iterable<RecipeChange> _scalars(Recipe from, Recipe to) sync* {
       '${from.baseServings}',
       '${to.baseServings}',
     ),
+    (
+      ChangeKind.servings,
+      'Makes',
+      from.makes == null ? null : countLabel(from, from.makes!.amount),
+      to.makes == null ? null : countLabel(to, to.makes!.amount),
+    ),
     // Joined rather than set-diffed like tags, because these are *ordered*:
     // promoting the second url to first is a real change that a set would
     // report as none. Whole urls, not hosts — swapping one photo for another

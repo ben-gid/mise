@@ -58,9 +58,24 @@ ImageCredit _$ImageCreditFromJson(Map<String, dynamic> json) =>
 Map<String, dynamic> _$ImageCreditToJson(ImageCredit instance) =>
     <String, dynamic>{'name': instance.name, 'url': instance.url};
 
+Makes _$MakesFromJson(Map<String, dynamic> json) => Makes(
+  amount: (json['amount'] as num).toInt(),
+  one: json['one'] as String,
+  other: json['other'] as String,
+);
+
+Map<String, dynamic> _$MakesToJson(Makes instance) => <String, dynamic>{
+  'amount': instance.amount,
+  'one': instance.one,
+  'other': instance.other,
+};
+
 Recipe _$RecipeFromJson(Map<String, dynamic> json) => Recipe(
   title: json['title'] as String,
   baseServings: (json['base_servings'] as num).toInt(),
+  makes: json['makes'] == null
+      ? null
+      : Makes.fromJson(json['makes'] as Map<String, dynamic>),
   ingredients: (json['ingredients'] as List<dynamic>)
       .map((e) => Ingredient.fromJson(e as Map<String, dynamic>))
       .toList(),
@@ -85,6 +100,7 @@ Recipe _$RecipeFromJson(Map<String, dynamic> json) => Recipe(
 Map<String, dynamic> _$RecipeToJson(Recipe instance) => <String, dynamic>{
   'title': instance.title,
   'base_servings': instance.baseServings,
+  'makes': instance.makes?.toJson(),
   'ingredients': instance.ingredients.map((e) => e.toJson()).toList(),
   'steps': instance.steps.map((e) => e.toJson()).toList(),
   'notes': instance.notes,
