@@ -476,6 +476,19 @@ only. No `REVENUECAT_SECRET_KEY` means nobody is Pro. No `REVENUECAT_*_KEY` in
 `env.json` (`proOn`) means no paywall and no Settings panel, which is the
 empty-`PHOTO_PROXY` rule again.
 
+**The tour is owed, not repeated.** `onboarding.meta` is null → `skipped` →
+`done`, and `main()` writes `skipped` *before* the tour opens, so leaving it any way
+at all (Skip, back from page one, the app killed) counts as a skip. Seeing it through
+writes `done`. A skip still owes the sign-in page and the paywall: they come once, the
+first time the cook returns to the list from a recipe (`showOwedOnboarding`), and are
+marked `done` before they open. `main` reads the state and hands it to the list
+screen, which does no I/O for it — that is what keeps the existing widget tests,
+which never pass `onboarding:`, free of a tour. The sign-in page hides behind
+`accountsOn` and Pro behind `proOn`, so under `flutter test` the tour ends on its
+last explainer page; `OnboardingScreen`'s `accounts:`/`pro:` overrides exist only so
+a test can see the sign-in page. Pro is reached with `pushReplacement`, so back from
+the paywall lands on the list.
+
 **No state management package and none wanted** — three screens over one store, plain
 `StatefulWidget` + `setState`, `Navigator.push` between them. The store and parser are
 constructed once in `main()` and passed down by constructor.

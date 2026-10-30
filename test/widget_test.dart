@@ -10,6 +10,8 @@ import 'package:mise/recipe/recipe_store.dart';
 import 'package:mise/recipe/recipe_timers.dart';
 import 'package:mise/recipe/recipe_units.dart';
 import 'package:mise/recipe/ui/cook_log.dart';
+import 'package:mise/recipe/ui/glass.dart' show RoundBackButton;
+import 'package:mise/recipe/ui/onboarding_screen.dart';
 import 'package:mise/recipe/ui/recipe_detail_screen.dart';
 import 'package:mise/recipe/ui/recipe_list_screen.dart';
 import 'package:mise/recipe/ui/settings_screen.dart';
@@ -1351,5 +1353,96 @@ void main() {
     expect(find.text('Account'), findsNothing);
     expect(find.text('Continue with Google'), findsNothing);
     expect(find.text('Mise Pro'), findsNothing);
+  });
+
+  /// The list on a first launch, with the tour that opens over it.
+  Future<void> pumpFirstLaunch(WidgetTester tester) async {
+    await tester.runAsync(() async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: RecipeListScreen(
+            store: store,
+            parser: parser,
+            onboarding: 'new',
+          ),
+        ),
+      );
+      await pumpUntil(
+        tester,
+        () => find.text('Recipes that hold together').evaluate().isNotEmpty,
+      );
+    });
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('the tour opens on first launch and Done leaves it', (
+    tester,
+  ) async {
+    await pumpFirstLaunch(tester);
+    expect(find.text('1 of 5'), findsOneWidget);
+
+    for (final title in [
+      'Any size, any units',
+      'Import or Create',
+      'A photo for every recipe',
+      'Cook it, then note it',
+    ]) {
+      await tester.tap(find.text('Next'));
+      await tester.pumpAndSettle();
+      expect(find.text(title), findsOneWidget);
+    }
+    // No sign-in or Pro page under `flutter test`: the last page is the end.
+    expect(find.text('Skip'), findsNothing);
+    // Back walks the pages rather than leaving.
+    await tester.tap(find.byType(RoundBackButton));
+    await tester.pumpAndSettle();
+    expect(find.text('A photo for every recipe'), findsOneWidget);
+
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Done'));
+    await tester.pumpAndSettle();
+    expect(find.text('No recipes yet'), findsOneWidget);
+  });
+
+  testWidgets('Skip leaves the tour from any page', (tester) async {
+    await pumpFirstLaunch(tester);
+    await tester.tap(find.text('Next'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Skip'));
+    await tester.pumpAndSettle();
+    expect(find.text('Any size, any units'), findsNothing);
+    expect(find.text('No recipes yet'), findsOneWidget);
+  });
+
+  testWidgets('Settings opens the tour again', (tester) async {
+    tallSurface(tester);
+    await tester.pumpWidget(MaterialApp(home: SettingsScreen(store: store)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('How Mise works'));
+    await tester.pumpAndSettle();
+    expect(find.text('Recipes that hold together'), findsOneWidget);
+
+    await tester.tap(find.text('Skip'));
+    await tester.pumpAndSettle();
+    expect(find.text('Measure by'), findsOneWidget);
+  });
+
+  testWidgets('what a skipped tour owes is the sign-in page alone', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: OnboardingScreen(store: store, followUp: true, accounts: true),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('On every phone'), findsOneWidget);
+    expect(find.text('Continue with Google'), findsOneWidget);
+    expect(find.text('Not now'), findsOneWidget);
+    expect(find.text('Recipes that hold together'), findsNothing);
   });
 }

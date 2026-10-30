@@ -12,6 +12,7 @@ import '../recipe_sync.dart';
 import 'create_recipe_screen.dart';
 import 'glass.dart';
 import 'import_recipe_screen.dart';
+import 'onboarding_screen.dart';
 import 'recipe_detail_screen.dart';
 import 'settings_screen.dart';
 
@@ -25,10 +26,16 @@ class RecipeListScreen extends StatefulWidget {
   final RecipeStore store;
   final RecipeParser parser;
 
+  /// Where the tour stood when the app opened: `new` opens it over the list,
+  /// `skipped` owes its sign-in and Pro pages. [RecipeStore.onboarding] holds
+  /// it; `main` reads it, so the list screen does no I/O of its own for it.
+  final String onboarding;
+
   const RecipeListScreen({
     super.key,
     required this.store,
     required this.parser,
+    this.onboarding = 'done',
   });
 
   @override
@@ -41,11 +48,24 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
   /// What the search field holds, lower-cased. Empty shows the whole library.
   String _query = '';
 
+  late bool _owed = widget.onboarding == 'skipped';
+
   // Another phone's recipes, landed by sync.
   @override
   void initState() {
     super.initState();
     pulled.addListener(_reload);
+    if (widget.onboarding == 'new') {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _tour());
+    }
+  }
+
+  Future<void> _tour() async {
+    final seen = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(builder: (_) => OnboardingScreen(store: widget.store)),
+    );
+    _owed = seen != true && widget.onboarding == 'new';
   }
 
   @override
@@ -81,7 +101,12 @@ class _RecipeListScreenState extends State<RecipeListScreen> {
     );
     // An edit there saves a new version under a new id, and a cook logged
     // there can change which recipe was last made.
-    if (mounted) _reload();
+    if (!mounted) return;
+    _reload();
+    if (_owed) {
+      _owed = false;
+      await showOwedOnboarding(context, widget.store);
+    }
   }
 
   /// Import or Create, which both pop with the recipe they saved.

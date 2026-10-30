@@ -10,6 +10,7 @@ import '../recipe_store.dart';
 import '../recipe_units.dart';
 import 'cook_log.dart' show formatDay;
 import 'glass.dart';
+import 'onboarding_screen.dart';
 import 'pro_screen.dart';
 
 /// Settings. Appearance, then the display units, then the account when this
@@ -99,6 +100,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
           style: theme.textTheme.bodySmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),
+        ),
+        const SizedBox(height: 28),
+        const SectionLabel('Help'),
+        const SizedBox(height: 12),
+        OutlinedButton(
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(50),
+            side: BorderSide(color: glassRim(context)),
+            foregroundColor: theme.colorScheme.onSurface,
+            backgroundColor: theme.colorScheme.surface,
+          ),
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => OnboardingScreen(store: widget.store),
+            ),
+          ),
+          child: const Text('How Mise works'),
         ),
         if (proOn) ...[
           const SizedBox(height: 28),
@@ -323,29 +342,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (confirmed == true) await _run(deleteAccount);
   }
 
-  /// Runs an account action, answering any failure with a SnackBar — the same
-  /// way the photo picker degrades where its plugin is missing. Backing out of
-  /// the Google or Apple sheet is not a failure and says nothing.
-  Future<void> _run(Future<void> Function() action) async {
-    try {
-      await action();
-    } catch (e) {
-      // Logged before the cancel check, not after: Credential Manager reports a
-      // misconfigured OAuth client ("[16] Account reauth failed") as a cancel,
-      // and a silent misconfiguration is the worst kind.
-      debugPrint('Account action failed: $e');
-      final cancelled =
-          (e is GoogleSignInException &&
-              e.code == GoogleSignInExceptionCode.canceled) ||
-          (e is SignInWithAppleAuthorizationException &&
-              e.code == AuthorizationErrorCode.canceled);
-      if (cancelled || !mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Couldn't reach your account. Try again in a moment."),
-        ),
-      );
-    }
+  Future<void> _run(Future<void> Function() action) =>
+      runAccountAction(context, action);
+}
+
+/// Runs an account action, answering any failure with a SnackBar — the same
+/// way the photo picker degrades where its plugin is missing. Backing out of
+/// the Google or Apple sheet is not a failure and says nothing.
+Future<void> runAccountAction(
+  BuildContext context,
+  Future<void> Function() action,
+) async {
+  try {
+    await action();
+  } catch (e) {
+    // Logged before the cancel check, not after: Credential Manager reports a
+    // misconfigured OAuth client ("[16] Account reauth failed") as a cancel,
+    // and a silent misconfiguration is the worst kind.
+    debugPrint('Account action failed: $e');
+    final cancelled =
+        (e is GoogleSignInException &&
+            e.code == GoogleSignInExceptionCode.canceled) ||
+        (e is SignInWithAppleAuthorizationException &&
+            e.code == AuthorizationErrorCode.canceled);
+    if (cancelled || !context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text("Couldn't reach your account. Try again in a moment."),
+      ),
+    );
   }
 }
 

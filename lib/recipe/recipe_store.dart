@@ -356,6 +356,17 @@ class RecipeStore {
 
   Future<void> setAskMe(bool on) => _askMeFile.writeAsString(on ? 'on' : 'off');
 
+  /// How far the first-launch tour got: null never shown, `skipped` while the
+  /// sign-in and Pro pages are still owed, `done` once they have been shown.
+  /// Not synced, like [askMe]: a second phone gets its own tour.
+  File get _onboardingFile => File('${dir.path}/onboarding.meta');
+
+  Future<String?> onboarding() async =>
+      _onboardingFile.existsSync() ? _onboardingFile.readAsString() : null;
+
+  Future<void> setOnboarding(String state) =>
+      _onboardingFile.writeAsString(state);
+
   /// Everything sync carries, flattened to one value per key:
   /// `v/<id>` → `{recipe, parent}` with the *recorded* parent, `e/<version>/<entry>`
   /// → a cook entry, `units` → the [setUnitSystems] line. A key that isn't

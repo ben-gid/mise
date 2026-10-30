@@ -23,20 +23,35 @@ Future<void> main() async {
   );
   // Same fallback rule as the theme: anything unreadable reads as metric.
   applyUnitSystems(await store.unitSystems());
+  // Written before the tour opens, so leaving it any way at all — Skip, back,
+  // the app killed — counts as a skip. A build with no sign-in or Pro has
+  // nothing to owe.
+  final onboarding = await store.onboarding();
+  if (onboarding == null) {
+    await store.setOnboarding(accountsOn || proOn ? 'skipped' : 'done');
+  }
   // Before startAccount, so it hears the first account it settles on.
   startSync(store, parser);
   startPro();
   // Not awaited: the account is for sync and server routes, never for opening
   // the app, and offline it can take a while to settle.
   unawaited(startAccount());
-  runApp(RecipeApp(store: store, parser: parser));
+  runApp(
+    RecipeApp(store: store, parser: parser, onboarding: onboarding ?? 'new'),
+  );
 }
 
 class RecipeApp extends StatelessWidget {
   final RecipeStore store;
   final RecipeParser parser;
+  final String onboarding;
 
-  const RecipeApp({super.key, required this.store, required this.parser});
+  const RecipeApp({
+    super.key,
+    required this.store,
+    required this.parser,
+    required this.onboarding,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -54,7 +69,11 @@ class RecipeApp extends StatelessWidget {
         theme: AppTheme.light,
         darkTheme: AppTheme.dark,
         themeMode: themeMode.value,
-        home: RecipeListScreen(store: store, parser: parser),
+        home: RecipeListScreen(
+          store: store,
+          parser: parser,
+          onboarding: onboarding,
+        ),
       ),
     );
   }
